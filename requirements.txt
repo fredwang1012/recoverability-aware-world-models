@@ -1,0 +1,8 @@
+numpy
+scipy
+scikit-learn
+pandas
+matplotlib
+pytest
+# CARLA tasks only (python 3.12, no wheel for 3.14):
+# carla==0.9.16
