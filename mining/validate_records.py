@@ -47,7 +47,7 @@ def check_record(r):
         errs.append(f"evidence_class {r['evidence_class']} != classify {c['evidence']}")
     if r["evidence_class"] == "INVALID_RUN" and not r.get("invalid_reasons"):
         errs.append("INVALID_RUN without invalid_reasons")
-    if r["V"] is not None and np.isfinite(c["V"]) and abs(float(r["V"]) - c["V"]) > 1e-9:
+    if r["V"] is not None and not np.isnan(c["V"]) and not (float(r["V"]) == c["V"] or abs(float(r["V"]) - c["V"]) <= 1e-9):
         errs.append(f"V={r['V']} != max_j min_w R = {c['V']}")
     if r["V"] is not None and r["V_hind"] is not None and float(r["V"]) > float(r["V_hind"]) + 1e-9:
         errs.append("V > V_hind")

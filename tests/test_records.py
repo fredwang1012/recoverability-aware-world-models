@@ -53,3 +53,13 @@ def test_hidden_metadata_is_detected_in_features_only():
     assert VR.hidden_leaks(ok) == []                       # ids/labels are allowed outside the features
     assert VR.hidden_leaks(dict(ok, history=[{"obs": {"v": 12.0, "world_mode": "yield"}}]))
     assert VR.hidden_leaks(dict(ok, history=[{"obs": {"blueprint": "vehicle.audi.tt"}}]))
+
+
+def test_terminal_failure_minus_inf_gives_defined_V_and_validates():
+    r = _rec([[float("-inf"), float("-inf")], [float("-inf"), 0.3]], terminal=[[False, False], [False, True]])
+    assert r["V"] == 0.3 or r["V"] == -float("inf") or r["V"] == "-inf"
+    assert r["evidence_class"] == "U_LIBRARY"        # world 0 has no witness at all
+    assert VR.check_record(r) == []
+    r2 = _rec([[float("-inf")]], terminal=[[False]])
+    assert r2["V"] == "-inf" and r2["evidence_class"] == "U_LIBRARY"
+    assert VR.check_record(r2) == []

@@ -106,9 +106,9 @@ class ExecutionRecord:
         """Derive V, V_hind, info_gap, evidence_class from R_raw via contract.classify; INVALID_RUN overrides."""
         R = np.array([[np.nan if x is None else x for x in row] for row in self.R_raw], float)
         c = contract.classify(R, eps)
-        self.V = None if not np.isfinite(c["V"]) else float(c["V"])
-        self.V_hind = None if not np.isfinite(c["V_hind"]) else float(c["V_hind"])
-        self.info_gap = None if not np.isfinite(c["info_gap"]) else float(c["info_gap"])
+        self.V = None if np.isnan(c["V"]) else float(c["V"])                 # -inf allowed (terminal failure)
+        self.V_hind = None if np.isnan(c["V_hind"]) else float(c["V_hind"])
+        self.info_gap = None if np.isnan(c["info_gap"]) else float(c["info_gap"])
         self.evidence_class = "INVALID_RUN" if self.invalid_reasons else c["evidence"]
         self.best_policy = None if c["best_policy"] is None else self.policies[c["best_policy"]]
         self.coverage = {"run": int((~np.isnan(R)).sum()), "total": int(R.size)}
@@ -119,6 +119,8 @@ class ExecutionRecord:
         d = asdict(self)
         for k in ("R_raw", "R_norm"):
             d[k] = [[_ser(x) for x in row] for row in d[k]]
+        for k in ("V", "V_hind", "info_gap"):
+            d[k] = _ser(d[k])
         return json.loads(json.dumps(d, default=str))
 
 

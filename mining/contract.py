@@ -23,6 +23,13 @@ import numpy as np
 R_REF, U_LIBRARY, U_INFORMATION, UNRESOLVED = "R_REF", "U_LIBRARY", "U_INFORMATION", "UNRESOLVED"
 
 
+def _gap(V_hind, V):
+    """V_hind - V; NaN if either is unresolved or both are -inf (terminal failures; no finite price of ignorance)."""
+    if np.isnan(V) or np.isnan(V_hind) or (np.isneginf(V) and np.isneginf(V_hind)):
+        return np.nan
+    return float(V_hind - V)
+
+
 def classify(R, eps=0.0):
     R = np.asarray(R, float)
     if R.ndim != 2:
@@ -36,12 +43,12 @@ def classify(R, eps=0.0):
     r_upper = np.array([np.nanmin(R[j]) if known[j].any() else np.inf for j in range(n)])
     r_exact = np.where(known.all(axis=1), r_upper, np.nan)
     V_upper = float(np.max(r_upper)) if n else -np.inf                    # optimistic bound on V
-    V = float(np.nanmax(r_exact)) if np.isfinite(r_exact).any() else np.nan  # exact over fully-resolved policies
+    V = float(np.nanmax(r_exact)) if (~np.isnan(r_exact)).any() else np.nan  # exact over fully-resolved policies (-inf allowed)
 
     # hindsight per world (needs the column resolved for at least the best policy)
     world_best = np.array([np.nanmax(R[:, k]) if known[:, k].any() else np.nan for k in range(w)])
     world_feasible = world_best >= eps
-    V_hind = float(np.nanmin(world_best)) if np.isfinite(world_best).any() else np.nan
+    V_hind = float(np.nanmin(world_best)) if (~np.isnan(world_best)).any() else np.nan
 
     if witness.any():
         ev = R_REF
@@ -50,8 +57,8 @@ def classify(R, eps=0.0):
     else:
         ev = UNRESOLVED
     return {"evidence": ev, "V": V, "V_upper": V_upper, "V_hind": V_hind,
-            "info_gap": (V_hind - V) if np.isfinite(V) and np.isfinite(V_hind) else np.nan,
+            "info_gap": _gap(V_hind, V),
             "n_witness": int(witness.sum()), "n_refuted": int(refuted.sum()),
             "n_unresolved_entries": int((~known).sum()),
             "world_feasible": world_feasible.tolist(),
-            "best_policy": int(np.nanargmax(r_exact)) if np.isfinite(r_exact).any() else None}
+            "best_policy": int(np.nanargmax(r_exact)) if (~np.isnan(r_exact)).any() else None}
