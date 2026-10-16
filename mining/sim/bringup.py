@@ -37,16 +37,32 @@ OUT = "results/carla"
 CFG = M.DEFAULT_V2
 
 
+XODR = os.path.join(os.path.dirname(__file__), "assets", "straight_2lane.xodr")
+CUSTOM = "custom_straight"
+
+
 def connect(host, port, town):
+    """town == 'custom_straight' (default): generate the project's own straight 2-lane OpenDRIVE world ONCE per server
+    session (no repeated map loads - repeated load_world crashed the server).  Otherwise load the named CARLA town."""
     import carla
     client = carla.Client(host, port)
     client.set_timeout(120.0)
     world = client.get_world()
-    if town not in world.get_map().name:
-        world = client.load_world(town)
+    if town == CUSTOM:
+        if "straight_2lane" not in world.get_map().to_opendrive():
+            client.generate_opendrive_world(open(XODR, encoding="utf-8").read(),
+                                            carla.OpendriveGenerationParameters(vertex_distance=2.0, max_road_length=50.0,
+                                                                                wall_height=0.0, additional_width=0.6,
+                                                                                smooth_junctions=True, enable_mesh_visibility=True))
+            world = client.get_world()
+        site = find_straight_site(world, length=350.0, behind=250.0)
+    else:
+        if town not in world.get_map().name:
+            world = client.load_world(town)
+        site = find_straight_site(world)
     CarlaPlant.configure_world(world)
     world.tick()
-    return client, world, find_straight_site(world)
+    return client, world, site
 
 
 def make_plant(client, world, site, decel=None):
@@ -100,10 +116,8 @@ def set_wheels(plant, friction=None, torque=None):
 
 def measure_brake(plant, friction, torque, v0=20.0, steer=0.0):
     """Full brake from v0: decel = -slope of a linear fit of v(t) on 0.9*v0 .. 0.2*v0; also onset delay and residual RMS."""
+    plant.wheels_override = (friction, torque)                   # applied right after spawn, before warm-up
     _one_ego(plant, v0)
-    set_wheels(plant, friction, torque)
-    for _ in range(3):                                           # let new wheel parameters settle
-        plant.step({"ego": (0.3, 0.0, 0.0)})
     t, v, ay = [], [], []
     ctl_k0 = len(t)
     prev_yaw, a_lat = None, []
@@ -321,7 +335,7 @@ def main():
     ap.add_argument("--host", default="localhost")
     ap.add_argument("--port", type=int, default=2000)
     ap.add_argument("--ports", default="2000")
-    ap.add_argument("--town", default="Town04")
+    ap.add_argument("--town", default=CUSTOM)
     a = ap.parse_args()
     {"runtime": cmd_runtime, "calibrate": cmd_calibrate, "selftest": cmd_selftest, "determinism": cmd_determinism,
      "timing": cmd_timing}[a.cmd](a)

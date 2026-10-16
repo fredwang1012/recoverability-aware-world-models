@@ -47,6 +47,7 @@ class CarlaPlant:
         self.sensor, self._collisions, self.static = None, [], set()
         self.max_steer = math.radians(70.0)
         self._prev_v = None
+        self.wheels_override = None      # (tire_friction, max_brake_torque) applied BEFORE warm-up (calibration sweeps)
 
     # ------------------------------------------------------------------ settings (call once per world)
     @staticmethod
@@ -96,7 +97,21 @@ class CarlaPlant:
 
     # ------------------------------------------------------------------ physics profile
     def _apply_physics(self, a):
-        """Set tire friction and max brake torque so that full braking gives ~decel_target (from the calibrated profile)."""
+        """Set tire friction and max brake torque.  apply_physics_control RESETS the vehicle dynamics, so this must be called
+        right after spawn (before the warm-up approach), never on a moving vehicle.
+        wheels_override=(mu, torque) wins (calibration); else decel_target is mapped through the calibrated profile."""
+        if self.wheels_override is not None:
+            mu, torque = self.wheels_override
+            pc = a.get_physics_control()
+            ws = pc.wheels
+            for w in ws:
+                if mu is not None:
+                    w.tire_friction = float(mu)
+                if torque is not None:
+                    w.max_brake_torque = float(torque)
+            pc.wheels = ws
+            a.apply_physics_control(pc)
+            return
         if self.decel_target is None or not self.profile_data:
             return
         pc = a.get_physics_control()

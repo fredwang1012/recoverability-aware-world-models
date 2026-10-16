@@ -154,7 +154,7 @@ def main():
     ap.add_argument("--seeds", type=int, default=3)
     ap.add_argument("--host", default="localhost")
     ap.add_argument("--port", type=int, default=2000)
-    ap.add_argument("--town", default="Town04")
+    ap.add_argument("--town", default="custom_straight")
     args = ap.parse_args()
     fam, ctx = FAMILIES[args.family], make_ctx(args)
     outdir = f"results/{args.backend}/mining/{fam.name}"

@@ -42,8 +42,9 @@ class Site:
         return carla.Location(px, py, wp.transform.location.z + z_off)
 
 
-def find_straight_site(world, length=350.0, step=20.0, max_yaw_dev=1.0, max_dz=0.8):
-    """First straight stretch of `length` m whose right-most driving lane has a same-direction left neighbour."""
+def find_straight_site(world, length=350.0, behind=0.0, step=20.0, max_yaw_dev=1.0, max_dz=0.8):
+    """First straight stretch of `behind + length` m whose right-most driving lane has a same-direction left neighbour.
+    The road frame is anchored `behind` m into the stretch, so there is room behind x = 0 for rear actors and warm-up."""
     import carla
     cmap = world.get_map()
     for wp in cmap.generate_waypoints(step):
@@ -56,7 +57,7 @@ def find_straight_site(world, length=350.0, step=20.0, max_yaw_dev=1.0, max_dz=0
         if right is not None and right.lane_type == carla.LaneType.Driving and right.lane_id * wp.lane_id > 0:
             continue                                                  # want ego in the right-most lane
         ok = True
-        for s in np.arange(10.0, length + 1, 15.0):
+        for s in np.arange(10.0, behind + length + 1, 15.0):
             nx = wp.next(float(s))
             if (not nx or nx[0].is_junction or nx[0].get_left_lane() is None
                     or abs(_wrap(nx[0].transform.rotation.yaw - wp.transform.rotation.yaw)) > max_yaw_dev
@@ -64,6 +65,8 @@ def find_straight_site(world, length=350.0, step=20.0, max_yaw_dev=1.0, max_dz=0
                 ok = False
                 break
         if ok:
+            if behind > 0:
+                wp = wp.next(float(behind))[0]
             yaw = math.radians(wp.transform.rotation.yaw)
             n, w = 1, wp
             while True:                                               # count same-direction driving lanes to the left

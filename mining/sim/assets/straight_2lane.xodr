@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Project site "straight_2lane": one perfectly straight, flat 1500 m road, two same-direction driving lanes of 3.5 m.
+     Used for the corridor and two_lane sites (PDF 7.1: custom OpenDRIVE when no qualified existing site is available;
+     Town04 offers at most 230 m of straight multi-lane road and Town06 assets are not installed).
+     Lane ids -1 (left neighbour of the ego lane) and -2 (ego lane, right-most). No oncoming lanes, no shoulder: leaving either side is off-road. -->
+<OpenDRIVE>
+  <header revMajor="1" revMinor="4" name="straight_2lane" version="1.0" date="2026-10-15" north="0" south="0" east="1500" west="0"/>
+  <road name="Road1" length="1500.0" id="1" junction="-1">
+    <link/>
+    <planView>
+      <geometry s="0.0" x="0.0" y="0.0" hdg="0.0" length="1500.0"><line/></geometry>
+    </planView>
+    <elevationProfile>
+      <elevation s="0.0" a="0.0" b="0.0" c="0.0" d="0.0"/>
+    </elevationProfile>
+    <lateralProfile/>
+    <lanes>
+      <laneSection s="0.0">
+        <center>
+          <lane id="0" type="none" level="false">
+            <roadMark sOffset="0.0" type="solid" weight="standard" color="yellow" width="0.15"/>
+          </lane>
+        </center>
+        <right>
+          <lane id="-1" type="driving" level="false">
+            <width sOffset="0.0" a="3.5" b="0.0" c="0.0" d="0.0"/>
+            <roadMark sOffset="0.0" type="broken" weight="standard" color="standard" width="0.15"/>
+          </lane>
+          <lane id="-2" type="driving" level="false">
+            <width sOffset="0.0" a="3.5" b="0.0" c="0.0" d="0.0"/>
+            <roadMark sOffset="0.0" type="solid" weight="standard" color="standard" width="0.15"/>
+          </lane>
+        </right>
+      </laneSection>
+    </lanes>
+  </road>
+</OpenDRIVE>
