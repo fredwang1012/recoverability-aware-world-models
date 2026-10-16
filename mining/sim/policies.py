@@ -101,3 +101,63 @@ class BaselineThenHandover(Policy):
         if self._since(t) < self.params["prefix_s"]:
             return None
         return self.inner.decide(history, t)
+
+
+def _obstacle_passed(policy, ob):
+    """True once an obstacle in the ego/adjacent lane has been SEEN and none remains ahead or alongside (observations only)."""
+    ahead = [o for o in ob.objs if o["dx"] > -(o["hl"] + 2.3 + 1.0) and abs(o["dlat"]) <= 1.6 * ob.lane_w]
+    if ahead:
+        policy.seen = True
+    return bool(getattr(policy, "seen", False) and not ahead)
+
+
+class Nudge(Policy):
+    """Shift laterally to `lat_offset` (m, road frame, + = right) and stay there: the 'wider path' witness for RC16."""
+    terminal = "lane_follow"
+
+    def __init__(self, lat_offset=-0.8, lc_time=1.5, **kw):
+        super().__init__(lat_offset=lat_offset, lc_time=lc_time, **kw)
+        self.name = f"nudge_{'left' if lat_offset < 0 else 'right'}"
+
+    def decide(self, history, t):
+        return EgoCommand(long="keep", lat_target=self.params["lat_offset"], lc_time=self.params["lc_time"])
+
+
+class BypassThenStop(Policy):
+    """RC07 premature-hand-back policy: lane change left, then stop in the left lane once the obstacle is passed.
+    Decision uses only delivered observations (obstacle behind us => passed)."""
+    name, terminal = "bypass_then_stop", "protected_hold"
+
+    def __init__(self, lc_time=2.0, **kw):
+        super().__init__(lc_time=lc_time, **kw)
+
+    def reset(self):
+        super().reset(); self.passed, self.seen = False, False
+
+    def decide(self, history, t):
+        ob = history[-1]
+        if not self.passed and _obstacle_passed(self, ob):
+            self.passed = True
+        if self.passed:
+            return EgoCommand(long="brake", lat_target=-ob.lane_w)
+        return EgoCommand(long="keep", lat_target=-ob.lane_w, lc_time=self.params["lc_time"])
+
+
+class BypassThenReturn(Policy):
+    """RC07 supported continuation: lane change left, then once the obstacle is passed return to the original lane and keep
+    driving (hand back and continue), clearing the left lane for the fast rear actor."""
+    name, terminal = "bypass_then_return", "lane_follow"
+
+    def __init__(self, lc_time=2.0, **kw):
+        super().__init__(lc_time=lc_time, **kw)
+
+    def reset(self):
+        super().reset(); self.passed, self.seen = False, False
+
+    def decide(self, history, t):
+        ob = history[-1]
+        if not self.passed and _obstacle_passed(self, ob):
+            self.passed = True
+        if self.passed:
+            return EgoCommand(long="keep", lat_target=0.0, lc_time=self.params["lc_time"])
+        return EgoCommand(long="keep", lat_target=-ob.lane_w, lc_time=self.params["lc_time"])

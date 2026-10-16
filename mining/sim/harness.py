@@ -58,7 +58,8 @@ def terminal_test(mode, ego_hist, speeds, dt, cfg, spec):
         w = spec["lane_w"]
         centres = np.array(spec.get("lane_centres", [0.0, -w]))
         tail = ego_hist[-n:]
-        return all(min(abs(lat - centres)) <= 0.5 and abs(yaw) <= 0.05 for (_, lat, yaw) in tail)
+        tol = spec.get("lane_tol", 0.5)
+        return all(min(abs(lat - centres)) <= tol and abs(yaw) <= 0.05 for (_, lat, yaw) in tail)
     raise ValueError(f"unknown terminal mode {mode}")
 
 
@@ -144,15 +145,21 @@ def run_episode(plant, spec, policy, world, cfg=M.DEFAULT_V2, seed=0):
 
 
 def evaluate(plant_factory, spec, library, worlds, theta, case_id, family_id, split_group, backend, evidence_scope,
-             cfg=M.DEFAULT_V2, seed=0, physics_profile_id=None, runtime=None, parent_family_id=None, varied_factor=None):
+             cfg=M.DEFAULT_V2, seed=0, physics_profile_id=None, runtime=None, parent_family_id=None, varied_factor=None,
+             run_mask=None):
     """PDF 9.2: for each policy, for each compatible world, a fresh matched episode; store witness/counterexample/unresolved
-    evidence; classify with contract.classify.  Any invalid episode makes the whole record INVALID_RUN."""
+    evidence; classify with contract.classify.  Any invalid episode makes the whole record INVALID_RUN.
+    run_mask: optional set of (policy_idx, world_idx) pairs that are actually executed; every other entry stays None
+    (unresolved, never 0 / failure) - used for query-budget-limited searches (RC20)."""
     R_raw, R_norm, T, runs, invalid, descr = [], [], [], {}, [], []
     for mk in library:
         p0 = mk()
         descr.append(p0.descriptor())
         rr, rn, tt = [], [], []
-        for w in worlds:
+        for wi, w in enumerate(worlds):
+            if run_mask is not None and (len(R_raw), wi) not in run_mask:
+                rr.append(None); rn.append(None); tt.append(None)
+                continue
             plant = plant_factory()
             try:
                 res = run_episode(plant, spec, mk(), w, cfg, seed)
@@ -166,8 +173,7 @@ def evaluate(plant_factory, spec, library, worlds, theta, case_id, family_id, sp
             runs[f"{p0.name}/{w['name']}"] = {"termination": res.termination, "events": res.events, "margin": res.margin,
                                               "timestamps": res.timestamps, "final": res.ego[-1]}
         R_raw.append(rr); R_norm.append(rn); T.append(tt)
-    first = next(iter(runs.values()))
-    rec = ExecutionRecord(
+        rec = ExecutionRecord(
         case_id=case_id, family_id=family_id, split_group=split_group, backend=backend, theta=theta,
         policies=[p["name"] for p in descr], worlds=[w["name"] for w in worlds], R_raw=R_raw, R_norm=R_norm, terminal_ok=T,
         margin_config=dict(M.asdict(cfg)), evidence_scope=evidence_scope, seed=seed, policy_descriptors=descr,
