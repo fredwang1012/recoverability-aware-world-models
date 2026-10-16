@@ -5,9 +5,13 @@ import math
 import os
 import sys
 
+import numpy as np
+
+import contract
+
 REQUIRED = ["id", "source", "backend", "theta", "u", "seed", "world_set", "policy_library", "R", "V", "category",
             "evidence", "t_reveal", "margin_config", "descriptors", "pair_id", "pair_role", "varied_factor",
-            "trace_path", "eps", "edge_band", "planner_margin"]
+            "trace_path", "eps", "edge_band", "planner_margin", "evidence_class", "V_hind", "info_gap", "R_matrix", "worlds"]
 CATS = {"unrecoverable", "planner_failure", "edge", "safe"}
 EVID = {"verified_witness", "counterexample", "unresolved"}
 
@@ -44,6 +48,15 @@ def check(rec, root):
     for k, st in rec["evidence"].items():
         if (st == "verified_witness" and not rec["R"][k] >= eps) or (st == "counterexample" and not rec["R"][k] < eps):
             errs.append(f"evidence {k}={st} contradicts R")
+    # scene-level evidence class must equal contract.classify on the stored policy x world matrix (None = unresolved)
+    Rm = np.array([[np.nan if x is None else x for x in rec["R_matrix"][p]] for p in rec["policy_library"]], float)
+    c = contract.classify(Rm, eps)
+    if c["evidence"] != rec["evidence_class"]:
+        errs.append(f"evidence_class {rec['evidence_class']} != classify {c['evidence']}")
+    if np.isfinite(c["V"]) and abs(c["V"] - V) > 1e-9:
+        errs.append(f"V={V} != max_j min_w R = {c['V']}")
+    if np.isfinite(c["V_hind"]) and (abs(c["V_hind"] - rec["V_hind"]) > 1e-9 or rec["V_hind"] < V - 1e-9):
+        errs.append("V_hind inconsistent or below V")
     if rec["pair_id"] and (rec["pair_role"] not in ("unrecoverable", "recoverable") or not rec["varied_factor"]):
         errs.append("incomplete pair fields")
     if not os.path.exists(os.path.join(root, rec["trace_path"])):

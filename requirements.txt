@@ -1,8 +1,10 @@
+# Conda env: conda create -n carla312 python=3.12 && pip install -r requirements.txt
+# conda env config vars set PYTHONNOUSERSITE=1 -n carla312   (keeps system/user-site packages out)
 numpy
 scipy
 scikit-learn
 pandas
 matplotlib
+pyyaml
 pytest
-# CARLA tasks only (python 3.12, no wheel for 3.14):
-# carla==0.9.16
+carla==0.9.16   # cp312 wheel only; needs a CARLA 0.9.16 server (see docs/carla_setup.md)

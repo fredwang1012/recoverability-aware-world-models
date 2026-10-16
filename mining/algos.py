@@ -33,22 +33,24 @@ from core import EPS, EDGE_BAND
 # ---------------------------------------------------------------- baselines
 class Sobol:
     name = "sobol"
-    def __init__(self, rng, **_):
-        self.s = qmc.Sobol(core.D, scramble=True, seed=int(rng.integers(2**31)))
+    def __init__(self, rng, d=None, **_):
+        self.d = d or core.D
+        self.s = qmc.Sobol(self.d, scramble=True, seed=int(rng.integers(2**31)))
     def ask(self, n): return self.s.random(n)
     def tell(self, U, rows): pass
 
 
 class CEM:
     name = "cem"
-    def __init__(self, rng, elite_frac=0.25, explore=0.1, **_):
+    def __init__(self, rng, d=None, elite_frac=0.25, explore=0.1, **_):
+        self.d = d or core.D
         self.rng, self.ef, self.explore = rng, elite_frac, explore
-        self.mu, self.sd = np.full(core.D, 0.5), np.full(core.D, 0.3)
+        self.mu, self.sd = np.full(self.d, 0.5), np.full(self.d, 0.3)
         self.hist = []
     def ask(self, n):
-        U = np.clip(self.mu + self.sd * self.rng.standard_normal((n, core.D)), 0, 1)
+        U = np.clip(self.mu + self.sd * self.rng.standard_normal((n, self.d)), 0, 1)
         flip = self.rng.random(n) < self.explore             # keep some uniform exploration (mode collapse)
-        U[flip] = self.rng.random((int(flip.sum()), core.D))
+        U[flip] = self.rng.random((int(flip.sum()), self.d))
         return U
     def tell(self, U, rows):
         self.hist += [(r["V"], np.asarray(r["u"])) for r in rows]
@@ -74,14 +76,15 @@ def apply_vtransform(kind, v):
 class GPSearch:
     """mode='lcb'      minimize mu - kappa*sigma          (BO falsification)
        mode='straddle' maximize max(0, sqrt(beta)*sigma - |mu - EPS|), beta ~ chi2(2)   (randomized straddle)"""
-    def __init__(self, rng, mode="straddle", n_init=None, n_cand=3000, kappa=2.0, vtransform="none", **_):
+    def __init__(self, rng, d=None, mode="straddle", n_init=None, n_cand=3000, kappa=2.0, vtransform="none", **_):
+        self.d = d or core.D
         from sklearn.gaussian_process.kernels import ConstantKernel as C, Matern, WhiteKernel
         self.rng, self.mode, self.n_cand, self.kappa, self.vt = rng, mode, n_cand, kappa, vtransform
         self.name = "bo_lcb" if mode == "lcb" else "straddle"
-        self.n_init = n_init or 2 * core.D
-        self.sob = qmc.Sobol(core.D, scramble=True, seed=int(rng.integers(2**31)))
+        self.n_init = n_init or 2 * self.d
+        self.sob = qmc.Sobol(self.d, scramble=True, seed=int(rng.integers(2**31)))
         self.X, self.y = [], []
-        self.kernel = C(1.0) * Matern(np.full(core.D, 0.3), (0.05, 5.0), nu=2.5) + WhiteKernel(1e-3, (1e-6, 1e-1))
+        self.kernel = C(1.0) * Matern(np.full(self.d, 0.3), (0.05, 5.0), nu=2.5) + WhiteKernel(1e-3, (1e-6, 1e-1))
 
     def _fit(self, X, y, optimize=True):
         from sklearn.gaussian_process import GaussianProcessRegressor
@@ -124,8 +127,9 @@ class GPSearch:
 
 # ---------------------------------------------------------------- quality diversity
 class MapElites:
-    def __init__(self, rng, objective="fail", bins=(10, 10), ranges=((0, 8), (0, 10)),
+    def __init__(self, rng, d=None, objective="fail", bins=(10, 10), ranges=((0, 8), (0, 10)),
                  n_init=20, sigma=0.12, **_):
+        self.d = d or core.D
         self.rng, self.obj, self.bins, self.ranges = rng, objective, bins, ranges
         self.name = "qd_fail" if objective == "fail" else "qd_boundary"
         self.n_init, self.sigma, self.archive, self.seen = n_init, sigma, {}, 0
@@ -141,10 +145,10 @@ class MapElites:
 
     def ask(self, n):
         if self.seen < self.n_init or not self.archive:
-            return self.rng.random((n, core.D))
+            return self.rng.random((n, self.d))
         keys = list(self.archive)
         parents = [self.archive[keys[i]][1] for i in self.rng.integers(len(keys), size=n)]
-        return np.clip(np.array(parents) + self.sigma * self.rng.standard_normal((n, core.D)), 0, 1)
+        return np.clip(np.array(parents) + self.sigma * self.rng.standard_normal((n, self.d)), 0, 1)
 
     def tell(self, U, rows):
         for r in rows:
@@ -157,17 +161,18 @@ class MapElites:
 # ---------------------------------------------------------------- one-factor boundary bisection
 class Bisect:
     name = "bisect"
-    def __init__(self, rng, iters=4, **_):
+    def __init__(self, rng, d=None, iters=4, **_):
+        self.d = d or core.D
         self.rng, self.iters = rng, iters
         self.rows, self.chains, self.pairs, self.pending = [], [], [], []
-        self.sob = qmc.Sobol(core.D, scramble=True, seed=int(rng.integers(2**31)))
+        self.sob = qmc.Sobol(self.d, scramble=True, seed=int(rng.integers(2**31)))
 
     def _new_chain(self):
         bad = [r for r in self.rows if r["V"] < EPS]
         if not bad:
             return None
         u = np.asarray(bad[self.rng.integers(len(bad))]["u"])
-        f = int(self.rng.integers(core.D))
+        f = int(self.rng.integers(self.d))
         ends = [0.0, 1.0] if self.rng.random() < 0.5 else [1.0, 0.0]
         return {"u": u, "f": f, "ends": ends, "stage": "anchor", "lo": u.copy(), "hi": None, "k": 0}
 
@@ -212,11 +217,11 @@ class Bisect:
 
 
 REGISTRY = {
-    "sobol": lambda rng, **kw: Sobol(rng),
-    "cem": lambda rng, **kw: CEM(rng),
+    "sobol": lambda rng, **kw: Sobol(rng, **kw),
+    "cem": lambda rng, **kw: CEM(rng, **kw),
     "bo_lcb": lambda rng, **kw: GPSearch(rng, mode="lcb", **kw),
     "straddle": lambda rng, **kw: GPSearch(rng, mode="straddle", **kw),
-    "qd_fail": lambda rng, **kw: MapElites(rng, objective="fail"),
-    "qd_boundary": lambda rng, **kw: MapElites(rng, objective="boundary"),
-    "bisect": lambda rng, **kw: Bisect(rng),
+    "qd_fail": lambda rng, **kw: MapElites(rng, objective="fail", **kw),
+    "qd_boundary": lambda rng, **kw: MapElites(rng, objective="boundary", **kw),
+    "bisect": lambda rng, **kw: Bisect(rng, **kw),
 }

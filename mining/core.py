@@ -15,6 +15,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from contract import classify
+
 # ------------------------------------------------------------------ config
 POLICY_HZ, HORIZON_S, DT = 5, 8.0, 0.05
 LANE_W = 3.5
@@ -215,24 +217,37 @@ def margin(tr, cfg=DEFAULT_CFG):
 
 # ------------------------------------------------------------------ oracle
 def oracle(backend, theta, full=False, cfg=DEFAULT_CFG):
-    """V = max_j min_w r_j. With full=False, exact pruning: stop a policy as soon as it cannot beat the best."""
-    best, profile = -np.inf, {}
-    for P in LIBRARY:
+    """V = max_j min_w r_j (exact pruning when full=False).  Keeps the policy x world margin matrix R (NaN = not run).
+    full=True  -> every entry is evaluated, and contract.classify() assigns R_REF / U_LIBRARY / U_INFORMATION and the hindsight gap.
+    full=False -> only R_REF vs 'not R_REF' can be decided (pruned entries are unresolved, never negative evidence)."""
+    best = -np.inf
+    R = np.full((len(LIBRARY), len(WORLDS)), np.nan)
+    names = [P.name for P in LIBRARY]
+    for j, P in enumerate(LIBRARY):
         worst = np.inf
-        for w in WORLDS:
-            worst = min(worst, margin(backend.rollout(theta, w, P()), cfg))
+        for k, w in enumerate(WORLDS):
+            g = margin(backend.rollout(theta, w, P()), cfg)
+            R[j, k] = g
+            worst = min(worst, g)
             if not full and worst <= best:
                 break
-        profile[P.name] = worst
         best = max(best, worst)
     planner = min(margin(backend.rollout(theta, w, TTCBrakePlanner()), cfg) for w in WORLDS)
     cat = ("unrecoverable" if best < EPS else "planner_failure" if planner < EPS
            else "edge" if best < EPS + EDGE_BAND else "safe")
     m1, m2 = measures(theta)
+    resolved = ~np.isnan(R).any(axis=1)
+    best_j = int(np.argmax(np.where(resolved, np.nanmin(np.where(np.isnan(R), np.inf, R), axis=1), -np.inf)))
     row = {**theta, "V": float(best), "planner_margin": float(planner), "category": cat, "m1": m1, "m2": m2,
-           "best_policy": max(profile, key=profile.get)}
+           "best_policy": names[best_j]}
     if full:
-        row.update({f"r_{k}": float(v) for k, v in profile.items()})
+        c = classify(R, EPS)
+        row.update({"evidence": c["evidence"], "V_hind": c["V_hind"], "info_gap": c["info_gap"],
+                    "R": {names[j]: [None if np.isnan(x) else float(x) for x in R[j]] for j in range(len(names))},
+                    "worlds": list(WORLDS)})
+        row.update({f"r_{names[j]}": float(np.nanmin(R[j])) for j in range(len(names))})
+    else:
+        row["evidence"] = "R_REF" if best >= EPS else "NOT_R_REF(U_LIBRARY_or_U_INFORMATION; run full=True)"
     return row
 
 

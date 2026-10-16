@@ -1,0 +1,195 @@
+# Machine-readable catalogue of the 20 cases in "Recoverability: definitions, formulations and a constructed CARLA case catalogue"
+# (working spec, 15 Oct 2026). Intentions only - NOT labels. Labels come from executed evidence (contract.py).
+# schema_version 0.1.  status: NOT_EXECUTED for all.  Every numeric value is a pilot starting point, not a measured capability.
+schema_version: "0.1"
+sites:
+  corridor:   {desc: "straight constrained corridor, full-width stationary blocker, free rear and hold area", used_by: [RC01, RC02, RC08, RC12, RC17]}
+  two_lane:   {desc: "straight two-lane segment with recovery corridor, adjacent actor possible",            used_by: [RC03, RC04, RC05, RC06, RC07, RC09, RC12, RC15, RC16, RC17, RC18, RC20]}
+  occlusion:  {desc: "junction / occluding van / two-exit site with observation gate",                      used_by: [RC10, RC11, RC13, RC14]}
+  any:        {desc: "any qualified site",                                                                  used_by: [RC19]}
+build_order:
+  foundation:   [RC01, RC02, RC16, RC17]
+  core:         [RC03, RC07, RC12, RC19, RC20]
+  compositional: [RC04, RC05, RC06, RC08, RC15, RC18]
+  partial_observation: [RC10, RC11, RC14]
+  difficult_negatives: [RC09, RC13]
+cases:
+- id: RC01
+  title: Braking with a protected stop
+  site: corridor
+  intended_evidence: R_REF
+  mechanism: Stopped obstacle visible early enough for an executable braking policy to stop and remain protected.
+  sweep: {gap: "measured_stop_distance + reserve(1-3 m)"}
+  pilot: {speed_mps: 12.0, tau_s: 0.25, b_mps2: 6.0, reserve_m: 1.0, analytic_anchor_gap_m: [18.0, 15.5, 12.0]}
+  witness: [brake_hold]
+  refutation: []
+  terminal: {mode: protected_hold, hold_s: 4.0}
+  profile_contrast: "r(brake_hold) >= eps; terminal hold passes"
+  paired_with: [RC02]
+  analytic_reference: "d_required = v*tau + v^2/(2b) + c  (reference/corridor.py)"
+  diagnostic: Positive control and calibration target.
+- id: RC02
+  title: Too late to stop in a closed corridor
+  site: corridor
+  intended_evidence: U_MODEL (reference model only; CARLA scope must be qualified)
+  mechanism: Obstacle blocks every admissible route before the earliest possible stop.
+  sweep: {gap: "around the stopping boundary"}
+  pilot: {speed_mps: 12.0, tau_s: 0.25, b_max_mps2: 6.0, gap_m: 12.0}
+  witness: []
+  refutation: ["stopping-distance lower bound with genuine b_max and tau_min", "no alternative route across the blocked section"]
+  paired_with: [RC01, RC03]
+  analytic_reference: "gap < v*tau_min + v^2/(2 b_max)  => collision inevitable in model"
+  diagnostic: Clean negative anchor. Impact-speed reduction is mitigation, not a recovery witness.
+- id: RC03
+  title: Braking fails but lateral escape remains
+  site: two_lane
+  intended_evidence: R_REF (executable bypass witness)
+  mechanism: Longitudinal stopping requirement not met; adjacent corridor permits evasive motion.
+  sweep: {speed_mps: [8, 14], obstacle_distance: "derived from the MEASURED lateral maneuver"}
+  witness: [brake_steer_bypass_then_stabilize]
+  refutation: [brake_hold]
+  profile_contrast: "r(brake_hold) < eps and r(executable_bypass) >= eps"
+  paired_with: [RC02]
+  diagnostic: False rejection from braking-only reasoning.
+- id: RC04
+  title: Staged slowing before a feasible lane change
+  site: two_lane
+  intended_evidence: R_REF; single-stage candidates may fail
+  mechanism: Immediate high-speed lane change violates clearance/limits; braking first enables a later executable change.
+  sweep: {brake_prefix_s: [0.2, 1.0], lateral_duration_s: "coarse then local", front_gap: "coarse then local"}
+  witness: [staged_brake_change]
+  refutation: [straight_brake, immediate_lane_change]
+  profile_contrast: "r(staged_brake_change) >= eps; named immediate candidates < eps"
+  paired_with: [RC20, RC17]
+  diagnostic: Sequencing and held-out policy compositions.
+- id: RC05
+  title: Aborting an unsafe lane change
+  site: two_lane
+  intended_evidence: R_REF through abort or reselection
+  mechanism: Target gap closes while a return to the original corridor remains feasible.
+  sweep: {lateral_progress_at_reveal: "", target_rel_speed: "", source_rear_gap: "", control_latency_s: ""}
+  initial_state_rule: "start ego DURING a physically executed lane-change prefix; never teleport to a lateral pose"
+  witness: [abort_and_stabilize]
+  refutation: [commit_original_merge]
+  profile_contrast: "r(commit_original_merge) < eps; r(abort_and_stabilize) >= eps"
+- id: RC06
+  title: Yield, then use a time-varying gap
+  site: two_lane
+  intended_evidence: R_REF via timed or observation-conditioned continuation
+  mechanism: Immediate entry conflicts with a passing vehicle; waiting in a supported state creates a later gap.
+  sweep: {relative_phase: "", passing_speed: "", waiting_room_m: "", gap_observation_delay_s: ""}
+  note: "time-to-feasibility need not be monotonic; coarse scan then local refinement"
+  witness: [wait_observe_enter]
+  refutation: [immediate_entry]
+- id: RC07
+  title: Primary avoidance with continued secondary-threat management
+  site: two_lane
+  intended_evidence: R_REF only with a complete post-maneuver policy
+  mechanism: Two policies avoid the front obstacle; one hands back / stops in the path of a fast rear actor.
+  sweep: {secondary_arrival_s: "", handback_s: "", stabilization_s: ""}
+  witness: [avoid_and_continue_supported_corridor]
+  refutation: [premature_handback]
+  profile_contrast: "primary-only passes; full handback < eps; supported continuation >= eps"
+  diagnostic: Terminal supervision and secondary hazards (matches the selected proposal).
+- id: RC08
+  title: Protected waiting despite route noncompletion
+  site: corridor
+  intended_evidence: R_REF for safety; route success may be false
+  mechanism: Original goal unreachable in the task window but a protected hold is executable.
+  sweep: {blockage_duration_s: "across the route deadline"}
+  pilot: {hold_s: [3, 5]}
+  witness: [protected_hold]
+  note: "store route_goal_completed separately from safety recovery"
+- id: RC09
+  title: Front/rear conflict with no supported escape
+  site: corridor
+  intended_evidence: U_LIBRARY unless a full-model proof exists
+  mechanism: Front obstacle demands slowing; rear actor's approach makes braking responses unsafe; no lateral escape.
+  sweep: {front_clearance: "", rear_clearance: "", rear_closing_speed: "", rear_braking_delay: "", ego_response_bounds: ""}
+  refutation: ["a counterexample for EVERY finite causal policy incl. intermediate braking and forward progress"]
+  note: "hard negative; prioritise only after simple negatives work. 'hard brake' + 'full throttle' failing is not exhaustive"
+- id: RC10
+  title: Early evidence enables a contingent escape
+  site: occlusion
+  intended_evidence: R_REF under the information-constrained contract
+  mechanism: Hidden actor mode blocks one of two escape corridors; a shared initial slowdown preserves time to observe and pick the other.
+  sweep: {reveal_time_s: "relative to the measured last branch-response time"}
+  witness: [shared_slowdown_then_branch_on_delivered_observation]
+  refutation: [stop_in_place, fixed_left, fixed_right]
+  observation_contract: "identical permitted histories before reveal (unit-test it); observation gate first, physical occluder later"
+  analytic_reference: ["reference/info_tree.py (finite tree)", "Zhang & Fisac RSS 2021 closed-form safe set", "Branch MPC / contingency MPC for witness construction"]
+  paired_with: [RC11]
+- id: RC11
+  title: Late evidence prevents robust causal recovery
+  site: occlusion
+  intended_evidence: U_INFORMATION at the proved scope
+  mechanism: Each hidden world individually solvable, but decisions differ before the policy can tell them apart.
+  sweep: {evidence_arrival_s: "after the last common response opportunity"}
+  refutation: ["every shared causal policy in the named class refuted in at least one world", "per-world witnesses exist"]
+  note: "if a common stop/robust prefix succeeds, this is NOT information-infeasible. Do not say collision in every realized world."
+  paired_with: [RC10]
+- id: RC12
+  title: Recoverability lost by delaying intervention
+  site: [corridor, two_lane]
+  intended_evidence: positive before a measured boundary; scope-qualified negative after
+  mechanism: A collision-free baseline action consumes the time/space the recovery needs.
+  sweep: {baseline_prefix_ticks: "coarse then refine around crossing"}
+  analytic_reference: "corridor: T_p* = (gap - D_stop - c)/v"
+  note: "record the feasible-delay SET; moving traffic can create disjoint windows; check the prefix itself"
+- id: RC13
+  title: Over-approximated predictions falsely close a corridor
+  site: occlusion
+  intended_evidence: R_REF with a validated witness under declared dynamics
+  mechanism: Inflated or kinematically inconsistent prediction envelope rejects an action whose true continuations are supported.
+  sweep: {envelope_inflation: "", time_resolution: ""}
+  profile_contrast: "r(witness) >= eps in coherent worlds; approximate predictor rejects it"
+- id: RC14
+  title: Current-view aliasing resolved by past observations
+  site: occlusion
+  intended_evidence: different history-conditioned profiles; identical current frame
+  mechanism: Two current observations look the same; earlier observations established different hidden-actor states.
+  sweep: {time_since_last_observation_s: "", motion_uncertainty: ""}
+  leakage_rule: "actor IDs / colours must not act as hidden-mode labels; decisive evidence occurs before t0 and stays causally available"
+- id: RC15
+  title: Yielding must be observed, not assumed
+  site: two_lane
+  intended_evidence: R_REF only if a common causal fallback survives both modes
+  mechanism: Merge works if the adjacent actor yields but fails if non-yielding.
+  sweep: {actor_response_delay_s: "", rear_gap_m: "", ego_commitment_time_s: "", response_observability: ""}
+  witness: [observe_yield_else_fallback]
+  refutation: [always_merge]
+- id: RC16
+  title: Center-point clearance but body-footprint conflict
+  site: two_lane
+  intended_evidence: specific maneuver refuted; scene may still be R_REF
+  mechanism: Centerline clears an obstacle while the swept body intersects it.
+  sweep: {gate_width_m: "around footprint clearance", lateral_offset_m: ""}
+  geometry_rule: "use BoundingBox.get_world_vertices, actual extent, per-tick swept polygons; corroborate with CollisionEvent"
+- id: RC17
+  title: Response delay eliminates an earlier recovery option
+  site: [corridor, two_lane]
+  intended_evidence: R_REF at short delay -> negative/unresolved at longer delay
+  mechanism: A policy that succeeds with short delivered-observation-to-response delay fails with more.
+  sweep: {delay_s: [0.0, 0.15, 0.30, "refine"]}
+  analytic_reference: "corridor: tau* = (gap - v^2/(2b) - c)/v"
+  note: "explicit observation + command queues; during delay apply the previous control; log realized delays"
+- id: RC18
+  title: Requested control exceeds available authority
+  site: two_lane
+  intended_evidence: specific command refuted; scene label needs more evidence
+  mechanism: Predicted path requires steering rate / yaw rate / decel / combined force beyond the declared envelope.
+  sweep: {turn_duration_s: "", entry_speed_mps: "", combined_brake_demand: ""}
+  note: "do not assume max brake and max lateral are jointly attainable; physics changes only via a versioned, recalibrated profile"
+- id: RC19
+  title: Benign and label-preserving nuisance controls
+  site: any
+  intended_evidence: R_REF for benign anchor; paired profiles invariant only when justified
+  mechanism: Model should keep ordinary progress and not infer labels from appearance.
+  note: "nuisance = paint/material/distant non-interacting objects after visibility checks; darkness, fog, vehicle size, friction, visibility are NOT automatically invariant. Appearance variants (e.g. Cosmos Transfer) inherit the parent scene's theta and R."
+- id: RC20
+  title: Incomplete library must remain unresolved
+  site: two_lane
+  intended_evidence: UNRESOLVED -> R_REF when a held-out witness is admitted
+  mechanism: Restricted library contains only failing candidates while a successful causal continuation exists outside it.
+  sweep: {library_coverage: "", query_budget: ""}
+  note: "change the library/evidence field, NOT the physics; never encode missing margins as zero or failure; store library version"

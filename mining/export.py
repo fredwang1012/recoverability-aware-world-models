@@ -63,6 +63,8 @@ def make_record(backend, u, cfg, family, seed, pair=None, source="sim_mining"):
         "horizon_s": core.HORIZON_S, "eps": core.EPS, "edge_band": core.EDGE_BAND,
         "R": profile, "V": row["V"], "best_policy": row["best_policy"], "planner_margin": row["planner_margin"],
         "category": row["category"], "evidence": evidence(profile),
+        "evidence_class": row["evidence"], "V_hind": row["V_hind"], "info_gap": row["info_gap"],
+        "R_matrix": row["R"], "worlds": row["worlds"],
         "t_reveal": theta.get("t_reveal"), "margin_config": asdict(cfg),
         "descriptors": {"m1": row["m1"], "m2": row["m2"]},
         "pair_id": pair["pair_id"] if pair else None, "pair_role": pair["role"] if pair else None,

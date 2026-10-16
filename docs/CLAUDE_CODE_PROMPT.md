@@ -1,140 +1,100 @@
-# PROMPT FOR CLAUDE CODE — Approach 1: simulation mining of unrecoverable driving scenes (CARLA, headless)
+# PROMPT FOR CLAUDE CODE (v2) — Recoverability benchmark: physical CARLA scenarios + evidence-aware labels + boundary mining
 
-You are working in the repo/folder that contains `mining/` (core.py, algos.py, carla_backend.py, run.py, README.md) and `approach1_research_findings.md`. **Read `approach1_research_findings.md` first, then `mining/core.py`, `mining/algos.py`, `mining/carla_backend.py`, `mining/run.py`.** Do not start coding until you have read them.
+You are working in a folder containing `mining/` (code), `pdf_verification_and_additions.md`, `approach1_research_findings.md`. **Read, in this order:** (1) this prompt, (2) `pdf_verification_and_additions.md`, (3) `mining/contract.py`, `mining/core.py`, `mining/reference/*.py`, `mining/tests/*.py`, `mining/cases/catalogue.yaml`, (4) `mining/algos.py`, `mining/carla_backend.py`, `mining/run.py`, (5) `approach1_research_findings.md` for algorithm background. Do not write code before you have run `pytest -q` and seen it pass.
 
-## 1. Project context (read carefully)
+## 1. Project and your part
 
-University of Toronto CSC2626 (Imitation Learning for Robotics) final project, 4 people. Title: *Recoverability-Preserving World Models for Safety-Critical Imitation Learning.* Central hypothesis: a latent dynamics model trained to preserve observation-conditioned **recovery options** produces fewer false feasibility judgments and better imitation targets than predictive learning or a scalar safety head alone, including when the continuation-policy library changes.
+CSC2626 final project (4 people): *Recoverability-Preserving World Models for Safety-Critical Imitation Learning.* Pipeline:
+1. Mathematical definition of unrecoverability — **done** (the contract below; `mining/contract.py`).
+2. Concrete physical scenarios from that definition — **the 20-case catalogue RC01–RC20** (`mining/cases/catalogue.yaml`, from the PDF "Recoverability: definitions, formulations and a constructed CARLA case catalogue").
+3. **Generate simulations of those scenarios in CARLA, with evidence-backed labels — THIS IS YOUR JOB (Fred's).**
+4. World model that recognizes unrecoverability and improves recoverability without false judgment, trained on CARLA data (Andy, Victor).
+5. Evaluation (false admission / false rejection, etc.). 6. Autoware baseline.
+Fred also keeps the **boundary-mining algorithms** going: search within each case family to locate boundary bands and matched pairs, and to mine information-limited scenes. Kent does Approach 2 (public data, nuScenes/Argoverse/Waymo). Timeline (today 15 Oct 2026): proposal ~19 Oct; scenario reconstruction + Cosmos (appearance variants only) late Oct–early Nov; world-model/Autoware integration ~mid Nov.
 
-Team split: **Fred = Approach 1** (headless simulation mining of edge and unrecoverable cases — *this task*); Kent = Approach 2 (public data: nuScenes / Argoverse 2 / Waymo); Andy + Victor = formalizing recoverability and building the world model.
+## 2. The contract you must implement faithfully
 
-Pipeline (team plan): (1) find unrecoverable scenes — Approach 1 simulation mining, Approach 2 public data; (2) formalize unrecoverable-case semantics; (3) reconstruct them in CARLA; (4) use Cosmos to generate **appearance** variations; (5) formalize cases for world-model training; (6) train the world model; (7) integrate with Autoware; (8) test. Tech stack: **CARLA 0.9.16**, Cosmos Transfer1, Autoware (Open AD Kit CARLA sample), nuScenes/Waymo/Argoverse.
-
-Timeline (today is 15 Oct 2026): week of 12 Oct — discover data + unrecoverable scenes; **by 19 Oct — proposal done** (needs real Approach 1 results and figures); week of 26 Oct — reconstruct unrecoverable cases in CARLA + Cosmos; ~week of 9 Nov — integrate with world model and Autoware.
-
-Research highlights to serve: (a) how to meaningfully define unrecoverable scenarios; (b) how to formalize unrecoverability and build a world model to solve it.
-
-## 2. Formal definition you must preserve
-
-Scenario parameters θ ∈ [0,1]^d (decoded to physical units). Hidden worlds Ω (finite). Library Π of **causal** recovery policies (observation → command; never sees the world id). For each rollout, margin G is computed from privileged state, **for labels only**.
+A **history** h contains only what the policy was allowed to know (observation capture/delivery times, past commands and *applied* controls). A **world** ω is a mechanism (actor response rules + hidden state consistent with h), not a recorded path. A **policy** π is an executable, observation-conditioned, deterministic-given-history continuation (emergency phase + stabilization + terminal continuation); it never sees world id, future trajectories, scenario names or evaluator outcomes.
 
 ```
-r_j(θ) = min_{ω ∈ Ω} G(π_j, ω; θ)
-V(θ)   = max_j r_j(θ)
-recovery profile R(θ) = [r_1 … r_N]
-unrecoverable  ⇔  V(θ) < ε            (EPS = 0)
+G(π,ω;h) = min{ min_{s∈[t,t+H)} min_i m_i(x_s)/q_i ,  m_term/q_term }      m_i signed, + = accepted; q_i > 0 declared units
+r_π(h)  = min_{ω∈Ω(h)} G(π,ω;h)       R(h) = [r_π1 … r_πN]
+Rec(h;Π,Ω)   ⇔ ∃π∈Π_causal ∀ω∈Ω: G ≥ ε            Unrec ⇔ ∀π ∃ω: G < ε
+V = max_π r_π      V_hind = min_ω max_π G(π,ω)     V ≤ V_hind always; info_gap = V_hind − V
 ```
+Hard constraints = full-body (swept OBB) clearance minus a declared reserve c, permitted road area, physical actuation limits. Route progress, comfort, task completion are stored separately. Terminal continuation is **not** "speed = 0": e.g. protected hold with a specified future actor response, verified over the whole post-maneuver interval. If the terminal test is Boolean, G = path margin on a pass and −∞ on a fail, and the Boolean is stored separately.
 
-Categories: `unrecoverable` (V<ε), `planner_failure` (V≥ε but the planner under test fails), `edge` (ε ≤ V < ε+0.3), `safe`.
+**Evidence classes** (`contract.classify`): `R_REF` (a witness policy passes every declared world), `U_LIBRARY` (every policy in the named finite library has a valid refutation; says nothing about other policies), `U_INFORMATION` (U_LIBRARY plus every world individually has a witness: hindsight-feasible, causally infeasible), `UNRESOLVED` (missing entries / incomplete search; never a negative label), `U_MODEL` (needs an external sound proof under reference dynamics with a genuine b_max; **cannot be earned from CARLA runs**), `INVALID_RUN` (spawn/timing/controller/logging contract failed; excluded from denominators).
 
-**Non-negotiables**
-- "Unrecoverable" always means *relative to Π, Ω, horizon and ε* — never "physically impossible". Say so in docstrings, README text and plot titles.
-- Error directions: too-small Π → false "unrecoverable"; too-small Ω → false "recoverable". Do not hide this.
-- Three evidence statuses are kept: verified witness / verified counterexample for a policy / unresolved. Unresolved entries are masked, never invented.
-- Policies must not read privileged state or the world id.
-- Related concepts to cite: Inevitable Collision States, Time-To-React (max over maneuvers), Brake Threat Number ≥ 1, Hamilton–Jacobi collision-avoidance reachable sets.
+**Non-negotiables.** Intentions (`intended_outcome`) never become labels. A failed maneuver refutes one policy, not the scene. Failure to find a solution is not impossibility. Pruned or unrun policy×world entries are NaN, never zero or failure. "Unrecoverable" always means *relative to Π, Ω, horizon, ε, vehicle/physics profile*. A positive claim in one world supports only that execution. Learned predictions carry no evidential authority.
 
-## 3. What already exists (do not rewrite from scratch)
+## 3. State of the repo (what exists, what is verified)
 
-- `core.py`: space `SPACE` (obstacle_gap, adjacent_offset, adjacent_speed, ego_speed, reaction_delay, brake_limit), `decode`, `measures` (QD descriptors m1, m2), `WORLDS` (constant, idm_reactive, accelerating), 6 causal policies + `TTCBrakePlanner` (planner under test), `actor_margin`/`margin`, `oracle(backend, theta, full=False)` with exact pruning, and a fast numpy `MockBackend`.
-- `algos.py`: ask/tell optimizers: `sobol`, `cem`, `bo_lcb`, `straddle` (randomized straddle, β~χ²₂, kriging-believer batching), `qd_fail`, `qd_boundary` (MAP-Elites, 10×10 over m1,m2), `bisect` (one-factor boundary bisection producing matched pairs). `REGISTRY` maps names → constructors.
-- `carla_backend.py`: CARLA 0.9.16 backend. Synchronous mode, fixed 0.05 s, no_rendering_mode, **no Traffic Manager**, road frame (x forward, **lateral positive to the right**, left lane negative), scripted hidden-world actors, Stanley lane tracker, calibration of friction→decel, `--selftest`. **It has never been run against a live server. API names were checked against the 0.9.16 client wheel only.**
-- `run.py`: batched search loop with CSV checkpoint per batch, server pool (`--ports`), metrics, plots, `--bench`, `--report`, `--profiles`.
-- Mock benchmark (3 seeds × 100 scenes; NOT CARLA): straddle ≈ 28 near-boundary scenes/100 vs 5.7 for Sobol and the most distinct unrecoverable QD cells; cem/bo_lcb 85–90% unrecoverable but ~0 near boundary; bisect 6.7 matched pairs/100; MAP-Elites under-budgeted at 100.
+- `contract.py` — evidence classifier; tested (random-matrix duality, hindsight inequality, masking).
+- `reference/corridor.py` — the PDF's exact 1-D model: D_stop = vτ + v²/(2b); contact vs reserve vs witness labels; boundaries `T_p* = (gap−D_stop−c)/v` (RC12) and `τ* = (gap − v²/(2b) − c)/v` (RC17); `model_certificate` (needs genuine τ_min, b_max). **These are the analytic anchors CARLA must reproduce after calibration.**
+- `reference/info_tree.py` — finite information tree for RC10/RC11; label flips R_REF → U_INFORMATION at the analytic reveal threshold; physical impossibility gives U_LIBRARY; a common stop gives R_REF for any reveal time.
+- `reference/mine_corridor.py` — runs all mining algorithms against the analytic corridor boundary. Result (5 seeds, 80 scenes): straddle localizes the boundary ≈12× better than Sobol (0.19 m vs 2.45 m mean |G| of 20 closest) with GP-surrogate F1 0.987; bisect yields ≈9.6 matched pairs with 0.44 m midpoint error; CEM and BO-LCB falsify but do not localize.
+- `core.py` — scenario space θ (obstacle_gap, adjacent_offset, adjacent_speed, ego_speed, reaction_delay, brake_limit), 6 causal policies + `TTCBrakePlanner` (stand-in planner under test), heuristic margin G (**not yet the PDF's**), `oracle(full=True)` returns the R matrix + evidence + V_hind; numpy `MockBackend`.
+- `algos.py` — ask/tell optimizers, dimension-generic (`REGISTRY[name](rng, d=...)`): sobol, cem, bo_lcb, straddle, qd_fail, qd_boundary, bisect.
+- `carla_backend.py` — CARLA backend (road frame x forward, **lat positive to the right**, synchronous, fixed 0.05 s, no Traffic Manager, calibrated friction→decel, selftest). **Never run against a live server.** CARLA API names were checked against the 0.9.16 client wheel.
+- `cases/catalogue.yaml` — the 20 cases as data (site, mechanism, sweeps, witness/refutation policies, profile contrast, analytic references, build order). Intentions only.
+- `run.py` — batched ask/tell driver, CSV checkpoints, server pool, metrics.
+- Finding to respect: on the current two-lane mock scene, 0/200 random scenes are U_INFORMATION → that scene cannot test the information hypothesis; RC10/RC11/RC14 are required for it.
 
-## 4. Environment
+**Verified CARLA facts you may rely on:** `fixed_delta_seconds ≤ max_substep_delta_time × max_substeps` (use 0.05 / 0.01 / **10**; valid max_substeps range 1–16); synchronous mode + fixed step for reproducibility (still run a repeatability test); axes x forward / y right / z up, meters, degrees, left-handed; `CollisionEvent` has `other_actor`, `normal_impulse`, `frame`, `timestamp`; `BoundingBox.get_world_vertices/get_local_vertices/extent`; `WheelPhysicsControl.tire_friction/max_brake_torque/max_steer_angle`; recorder methods exist. **Not verified (treat as unknown):** ScenarioRunner compatibility with 0.9.16 (repo lists up to 0.9.15) → keep our own harness; "GPU sensor outputs arrive later than capture frames" (irrelevant until cameras); TM reseeding after reload (we do not use the TM).
 
-- Python 3.12. Dependencies: numpy, scipy, scikit-learn, pandas, matplotlib, `carla==0.9.16` (client), pytest.
-- Server: `./CarlaUE4.sh -RenderOffScreen -nosound -carla-rpc-port=PORT` (one process per port). If no GPU/server is available in your environment, **say so, run everything that can run on the mock, and leave CARLA tasks clearly marked as not executed.** Never fabricate CARLA outputs.
-- Use **CARLA 0.9.16**, not 0.10.0 (Cosmos Transfer1 integration and the Autoware Open AD Kit sample target 0.9.16).
-- Scenic's documented CARLA support is 0.9.9–0.9.14. Do not make the pipeline depend on Scenic.
+## 4. Environment and rules
 
-## 5. Tasks, in priority order (each has acceptance criteria)
+Python 3.12; numpy, scipy, scikit-learn, pandas, matplotlib, pyyaml, pytest, `carla` client matching the server (pin and record the server build; 0.9.16 preferred because Cosmos Transfer1 and the Autoware Open AD Kit CARLA sample target it; do not upgrade the simulator just for this). Server: `./CarlaUE4.sh -RenderOffScreen -nosound -carla-rpc-port=PORT`, one process per port. **If no CARLA server/GPU is available, run all mock/reference work, mark CARLA tasks "NOT EXECUTED", and never fabricate CARLA outputs.** Scenic's documented CARLA support is 0.9.9–0.9.14: do not depend on Scenic. No Traffic Manager/autopilot for decisive actors; use project-owned finite-state actor controllers keyed to simulation time or observed events. Keep mock and CARLA results in separate files/tables. Long runs: chunk, checkpoint, resume.
 
-### T0 — Tests and hygiene (first, ~1 hour)
-Create `tests/` with pytest:
-1. `actor_margin` unit tests: collision → None; car in another lane → 1.0; stopped behind obstacle with gap g → (g)/5 when closing = 0; squeeze alongside → negative.
-2. **Analytic cross-check (BTN).** For the mock with only `emergency_brake` and no other actors: scene is recoverable iff stopping distance `v²/(2·a)` + reaction-delay travel `v·delay` < gap − vehicle length (± one timestep tolerance). Sweep ≥ 200 random θ; ≥ 99% agreement; list disagreements.
-3. Determinism: same θ → identical trace on the mock (exact) and later on CARLA (tolerance).
-4. Algorithm smoke tests: each algorithm in `REGISTRY` runs 24 scenes on the mock without error; `bisect` pairs satisfy V(lo)<ε≤V(hi) and differ in exactly one coordinate.
-5. Ask/tell contract: `ask(n)` returns an (n, d) array in [0,1].
-**Accept:** `pytest -q` green; BTN agreement reported in the test output.
+## 5. Tasks, in order, each with acceptance criteria
 
-### T1 — Fix known weaknesses in the label definition (mock first)
-1. Put every constant of G (LAT_CLEAR, HEADWAY_S, MARGIN_SCALE, failure severity scales) into one frozen dataclass `MarginConfig` with units in comments; thread it through `margin`, `oracle`, backends. This lets Andy/Victor change G in one place.
-2. Add a sensitivity sweep script: vary each G constant ±50% and report how many scenes change category. Report as a table. **Accept:** table in `results/g_sensitivity.md`.
-3. Transform V for GP-based algorithms (e.g. `clip(V, −0.5, 0.5)` or `tanh(2V)`) behind a flag `--vtransform`; benchmark straddle with and without on the mock (≥ 10 seeds). **Accept:** table + one-paragraph conclusion.
+### Phase A — contract and label machinery (no CARLA needed; do first)
+- **A0** `pytest -q` green (currently 9 tests). Add tests as you go.
+- **A1 Margin per the PDF.** Replace the heuristic `margin` with a `MarginConfig` dataclass (reserve_m, q_clear, q_road, q_dyn, q_latency, terminal spec, ε, horizon, post-maneuver seconds; units in comments) and compute: signed clearance between **oriented-box polygons** minus reserve (use `BoundingBox.get_world_vertices` in CARLA; shapely or manual SAT in the mock), per-tick **swept** check (refine between ticks), permitted-road margin, dynamic-limit margins, terminal test stored as a Boolean beside G. Keep a separate continuous **search-grade** G̃ for the mining algorithms (clipped severity, never used for labels). Defaults to start from: c = 1 m, ε = 0, hold 4 s, q_clear = 5 m. **Accept:** corridor-family unit tests reproduce the PDF's numbers (15 m, 16 m, three labels) *through the new margin code path*; sensitivity table of category changes under ±50% of each constant → `results/g_sensitivity.md`.
+- **A2 Execution record + manifest.** Implement the PDF §12 schema: `case_spec` (intent) / `execution_record` (measured) / `learning_example` (features only) kept separate. Mandatory execution fields: resolved transforms and blueprint IDs, actual geometry/physics values, every policy descriptor + version, capture/delivery/decision/command/response timestamps, per-world raw and normalized margins, collision/road events, witness/refutation traces, policy/world coverage, termination cause, seed, code version, invalidity reasons, checksums, `split_group`, `parent_family_id`, `varied_factor`. **Accept:** `validate_records.py` checks schema, `V == max_j min_w R`, evidence consistent with `contract.classify`, no NaN written as numbers, hidden metadata absent from features.
+- **A3 Mining on analytic families (keep trying).** Extend `reference/mine_corridor.py` to (i) RC12 (θ = gap, v, τ, b, prefix) and RC17 (delay) and (ii) the information tree (θ = D, t_obs, T_lat, τ_plan). Add **information-gap mining**: objective V_info = V_hind − V subject to V_hind ≥ ε (maximize), via CEM and via straddle on V with V_hind as a constraint. **Accept:** table of boundary distance / surrogate F1 / pairs per algorithm over ≥ 10 seeds; for the info tree, the found U_INFORMATION region matches the analytic threshold within one grid step.
 
-### T2 — CARLA bring-up (blocks everything real)
-1. `python carla_backend.py --port 2000 --calibrate`; save `friction_calibration.json`; plot decel vs friction. **Accept:** monotone mapping covering 5–9 m/s²; if not, adjust the friction range and document.
-2. `--selftest`; verify: `keep` holds speed (|Δv| < 0.5 m/s over 8 s), `emergency_brake` decel within 10% of `brake_limit`, `left_now` ends at lateral ≈ −lane_w ± 0.3 m, no off-road for a clean lane change. Fix the controller if not (Stanley gains, throttle map, lane tracking), keeping the road-frame sign conventions.
-3. **Determinism check:** same θ, same policy, same world, run twice (and across two servers) → traces agree to < 0.05 m / 0.05 m/s. If they do not, find the nondeterminism (settle ticks, physics substepping, spawn z, Traffic Manager) before anything else.
-4. Timing profile: ms per tick, seconds per rollout, seconds per oracle call (pruned and full); estimate scenes/hour per server. Write to `results/carla_timing.md`.
-5. Parallel servers: run `--ports 2000,2002,2004,2006`; verify linear-ish speed-up.
-**Accept:** selftest output pasted into `results/carla_selftest.txt`, determinism and timing tables written. Do not proceed to T4 if determinism fails.
+### Phase B — CARLA bring-up (gates everything real)
+- **B1** Pin runtime: server build, client wheel version, map name/hash, vehicle blueprints, physics profile id, settings (sync, 0.05 s, substepping 0.01×10). Write `results/runtime.json`.
+- **B2 Calibrate** (`--calibrate`): sweep **both** `tire_friction` and `max_brake_torque`; measure achievable straight-line decel vs both; measure delivered-command→response delay, steering-rate response, lateral tracking, combined brake–steer limits for the actual blueprint. Output a versioned physics profile. **Accept:** decel mapping covering ~5–9 m/s² with residuals; profile hash stored in every record.
+- **B3 Selftest + determinism.** keep holds speed (|Δv|<0.5 m/s/8 s); emergency brake decel within 10% of the commanded limit; left lane change ends at lateral ≈ −lane_w ± 0.3 m; same case twice (and across two servers) agree to < 0.05 m / 0.05 m·s⁻¹. If not: diagnose (settle ticks, spawn z, substepping, controller state) before anything else.
+- **B4** Timing profile (ms/tick, s/rollout, s/oracle call pruned vs full), parallel scaling with `--ports`.
+- **B5** Geometry: OBB polygons per tick, swept check, collision-sensor corroboration, separate permitted-road test (`map.get_waypoint(..., project_to_road=False)`), lane invasion not used as a safety verdict.
+- **B6** Observation and command queues: explicit capture/delivery/decision/command/response timestamps; quantize delays to the tick grid and log realized delay; during a delay apply the actual previous control; no backdating. Observation gate over simulator-derived structured observations first (cameras later).
+- **B7** Actor controllers: bounded cruise, delayed braking, gap-triggered yield, explicit non-yield, hidden-until-reveal actor; exogenous modes chosen per world, not re-drawn per tick.
+**Accept for Phase B:** `results/carla_selftest.txt`, `runtime.json`, determinism table, timing table.
 
-### T3 — Validate the oracle against an independent method
-1. BTN/analytic check from T0 on CARLA's brake-only policy (stopping distance with calibrated decel).
-2. (Stretch) Hamilton–Jacobi reachability on a reduced longitudinal two-car model (ego brakes/accelerates, lead vehicle worst-case braking) using a JAX/Python HJ toolbox (e.g. `hj_reachability` or OptimizedDP — verify availability); compare the avoidable set with the oracle restricted to the longitudinal policies. Report disagreement.
-**Accept:** agreement numbers + a short note on where and why the oracle differs.
+### Phase C — build the physical cases (the PDF's order; reuse three sites)
+Site registry first: `corridor`, `two_lane`, `occlusion` (find once with the waypoint API; straight length ≥ ~350 m, rightmost lane with a left neighbour; try Town04, then Town06). Every case = `case_spec` YAML + a builder + a policy library + a world set + an evidence run. Build a witness first, then place the hazard relative to it; the negative counterpart changes exactly one declared variable. Build order and acceptance:
+1. **Foundation: RC01, RC02, RC16, RC17.** **Accept:** CARLA gap/delay boundaries from sweeps match the analytic anchors `d_required` and `τ*` after substituting the *calibrated* b and delay (report the residual in metres/seconds); RC16 point-safe maneuver refuted by body-level trace while a wider path is a witness; RC02 reported as `U_LIBRARY` in CARLA (and `U_MODEL` only for the reference model).
+2. **Core: RC03, RC07, RC12, RC19, RC20.** **Accept:** RC03 shows r(brake_hold)<ε and r(bypass)≥ε; RC07 shows primary-only passes while handback fails and continuation passes; RC12 feasible-delay *set* recorded (not a single threshold); RC19 benign anchor + nuisance pair agree within tolerance; RC20 shows UNRESOLVED → R_REF when a held-out witness is admitted with physics unchanged.
+3. **Compositional: RC04, RC05, RC06, RC08, RC15, RC18.** At least one audited positive witness per family.
+4. **Partial observation: RC10, RC11, RC14.** Two worlds with identical permitted histories before reveal (unit-test it). Witness for RC10 = shared slowdown trunk + branch on the delivered observation (construct it with branch-MPC / contingency-MPC ideas: Chen et al. arXiv:2109.05128; Alsterda & Gerdes arXiv:2102.12045). Cross-check the reveal-time boundary against `reference/info_tree.py` and, if feasible, the Zhang & Fisac (RSS 2021) closed-form safe set. **Accept:** reveal sweep shows the R_REF → U_INFORMATION transition; common stop/robust prefix present ⇒ NOT classified information-infeasible; leakage test (no hidden id/colour/blueprint/coordinate in policy inputs).
+5. **Difficult negatives: RC09, RC13.** Only after simple negatives work. RC09 needs a counterexample for *every* policy in the stated class including intermediate braking/forward progress.
+First audit batch (PDF §11.1): 6 selected contrasts × 3 parameter settings × 3 matched seeds = 54 physical instances; with 8 policies × 2 worlds = 864 policy/world executions. Inspect jointly one positive, one refuted policy and one unresolved instance before expanding. A template that repeatedly violates its intended mechanism is revised or excluded, never relabeled.
 
-### T4 — Run the algorithms on CARLA (the proposal deliverable)
-Budget plan (adjust after T2 timing): `sobol` 40 → `cem` 30 → `straddle` 80 → `bisect` 50 → `qd_boundary` 100. Warm-start later stages with earlier rows (`algo.tell`). Use ≥ 2 servers. Checkpoint every batch.
-Outputs per algorithm: `samples_<algo>.csv`, `summary.csv`, `descriptor_space.png`, `matched_pairs.json`, `mined_scenes.json` (with full R(h) via `--profiles`).
-**Accept:** (a) table of metrics for CARLA runs (separate from mock), (b) recoverability scatter in (m1,m2) coloured by category, (c) 5–10 matched pairs with a short human-readable description each ("same scene except reaction delay 1.0 s vs 1.2 s"), (d) all numbers reproducible from saved CSVs with `run.py --report`.
+### Phase D — boundary mining inside the case families (continue the algorithm work)
+- **D1** For each built family, define θ from its `sweep` block, run **sobol (baseline) → straddle → bisect** (and cem/bo_lcb as falsifiers, qd_boundary at larger budget), warm-starting later stages with earlier rows. Use the label-grade evidence for the final scenes, search-grade G̃ for the search.
+- **D2** Score boundary localization against the analytic anchors where they exist (RC01/02/12/17, info tree); elsewhere against a dense local scan.
+- **D3** Emit matched pairs (single declared changed variable, same `split_group`), each with a human-readable description ("same scene except reaction delay 1.0 s vs 1.2 s") and both members re-labeled with the *full* R matrix.
+- **D4** Near the threshold (within 1σ of repeat variation) run ≥ 3 matched repeats; if the sign changes mark the band UNRESOLVED. Never move ε after seeing student results.
+- **D5** Information-gap mining on RC10/RC11 and the hidden-actor variant of the two-lane scene: find scenes with V_hind ≥ ε and V < ε.
+- Budget realism: plan ≈ 100–200 scenes per algorithm per family; stay inside the 864-execution audit batch first.
+**Accept:** per-family table (algorithm × {unrecoverable count, near-boundary count, boundary distance, pairs, evidence mix}); recoverability map for at least RC01 and the two-lane family; list of matched pairs.
 
-### T5 — Point-of-no-return (Time-To-React) scan
-For a nominal keep-speed rollout, find the time t* at which V(h_t) crosses ε. Implement two ways and compare: (i) re-spawn and replay the nominal prefix to time t then branch into the library; (ii) CARLA recorder: record the nominal run, `replay_file(..., start=t)`, stop playback, take control, branch. Measure how much (ii) perturbs outcomes vs (i). **Accept:** plot V(h_t) vs t for ≥ 5 scenes; table of t* from both methods; recommendation of which to use.
+### Phase E — interfaces for teammates (do not build the world model)
+- **E1 Dataset export**, JSONL + npz traces: `case_id, family_id, split_group, theta, history (delivered observations with timestamps), policy_library_id/version, world_set_id, R (masked), V, V_hind, info_gap, evidence, margin_config, physics_profile, terminal {mode, boolean}, pair_id/role/varied_factor, parent_id, variant_kind ("appearance" for Cosmos variants)`. **Appearance variants (Cosmos Transfer1) inherit θ and R; they never create new dynamics.** Split complete counterfactual families together (all distance neighbours, observation variants, renderings, policy-withholding variants).
+- **E2 Evaluation harness** (metrics only + a trivial TTC-threshold baseline to test it): false admission, false rejection, retained feasible actions, profile fidelity near ε, multi-step consistency, information correctness (pre-reveal action consistency, premature branching), evidence integrity (resolved fraction, invalid-run rate, cost), paired independent episodes, intervals at episode/family level; mock vs CARLA separate.
+- **E3 Planner backend interface**: `PlannerBackend` with `TTCBrakePlanner` as default; leave a documented stub for Autoware (Open AD Kit CARLA sample, `autoware_carla_interface`, CARLA 0.9.16). Do not integrate Autoware before the finite reference tests are stable.
 
-### T6 — Occluded-actor scenario family (proposal's second family)
-Add a hidden vehicle revealed at a configurable time `t_reveal` (and optionally an occluder object). Policies see the actor only after reveal. Worlds Ω now vary the hidden actor's behaviour. Keep the label contract unchanged (shared history, same observation before reveal). Add `t_reveal` to SPACE. **Accept:** mock + CARLA both run; show that V decreases with later `t_reveal` for fixed geometry.
+## 6. Engineering rules
+- One source of truth for constants (`MarginConfig`, physics profile, library and world-set versions); write them into every record.
+- Backends implement only `rollout(theta, world, policy) -> trace`; keep `core.oracle` signature stable; every algorithm stays ask/tell.
+- Every long run checkpoints per batch; resume by skipping completed work.
+- When something looks wrong (selftest off, nondeterminism, spawn overlap, anchors not reproduced) **stop and diagnose before running search**, then report what you saw.
+- Do not claim what you did not produce. If an acceptance criterion is not met, say which and why.
+- Small reviewable commits: tests → margin/config → records → CARLA bring-up → cases → mining → export.
 
-### T7 — Dataset export for the world model (schema agreed with Kent, Andy, Victor)
-JSONL, one record per scene:
-```
-{ "id", "source": "sim_mining" | "real_log", "backend": "carla-0.9.16" | "mock",
-  "theta": {...physical units...}, "u": [...], "seed", "world_set": [...], "policy_library": [...],
-  "R": {policy: margin}, "V", "category", "evidence": {policy: "verified_witness"|"counterexample"|"unresolved"},
-  "t_reveal": null|float, "margin_config": {...}, "descriptors": {"m1","m2"},
-  "pair_id": null|str, "pair_role": null|"unrecoverable"|"recoverable", "varied_factor": null|str,
-  "trace_path": "traces/<id>.npz" }
-```
-Also export per-scene state/observation traces (npz), a `replay_scene.py <id>` script that re-creates the scene in CARLA (and optionally records sensor streams: segmentation, depth, HD-map render) for Cosmos conditioning. **Cosmos Transfer only varies appearance:** all appearance variants inherit the scene's θ and R; store `parent_id` and `variant_kind: "appearance"`.
-**Accept:** `validate_dataset.py` checks schema, no NaNs, `V == max_j R_j`, category consistent with V and ε.
-
-### T8 — Planner under test: Autoware
-Replace `TTCBrakePlanner` with Autoware (Open AD Kit CARLA sample, `autoware_carla_interface`, CARLA 0.9.16) behind a `PlannerBackend` interface so the oracle can still run with the TTC stand-in. Report `planner_failure` rate for Autoware vs TTC stand-in on the mined scenes. **Accept:** same scenes scored by both planners; if Autoware cannot be brought up in the time available, document the blocker and leave the interface in place.
-
-### T9 — Proposal assets (needed by 19 Oct)
-Produce, from saved results only: one figure of the recoverability map in (m1,m2); one figure of the point-of-no-return curve (T5 if ready, else mock); one table comparing algorithms (mark mock vs CARLA); one paragraph defining unrecoverability with the error-direction statement; list of matched pairs. Put in `results/proposal_assets/`.
-
-## 6. Algorithm specifications (reference; implemented in `algos.py`)
-
-- **sobol** — scrambled Sobol baseline. Corso et al., JAIR 2021.
-- **cem** — Gaussian over [0,1]^d; elites = lowest-V 25% of history (min 3); `μ ← 0.7·mean(elite)+0.3·μ`; `σ ← max(0.7·std(elite)+0.3·σ, 0.05)`; 10% uniform exploration. Falsifier.
-- **bo_lcb** — GP (Constant × Matern ν=2.5 ARD + White), acquisition `argmin μ − 2σ` over 3000 Sobol candidates; batch by kriging believer (frozen hyper-parameters). Falsifier.
-- **straddle** — same GP, threshold h=ε; acquisition `max(0, √β·σ − |μ−h|)`, β~χ²₂ per pick (Inatsu et al. 2024; Bryan et al. 2005). Boundary finder. Fall back to `argmax σ` if all zero.
-- **qd_fail / qd_boundary** — MAP-Elites (Mouret & Clune 2015) with descriptors m1 = gap/ego_speed, m2 = time until the left-lane car catches the ego; archive 10×10; mutation σ=0.12; fitness −V or −|V−ε|. Upgrade to CMA-ME for larger budgets (CaDRE, arXiv:2403.13208).
-- **bisect** — pick unrecoverable u, random factor, anchor on a recoverable end of that factor, bisect 4×, emit matched pair. Chains are state machines so they batch.
-- **Not implemented on purpose:** adaptive stress testing (static θ), NSGA-II/surrogates, KING-style gradients, LLM/Scenic generation. Add only if a task needs them.
-
-## 7. Engineering rules
-
-- Keep the ask/tell interface and `core.oracle` signature stable; backends implement only `rollout(theta, world, policy) -> trace`.
-- No Traffic Manager/autopilot in CARLA; every actor is driven by our controllers. Fixed seeds everywhere; log them.
-- Every long run checkpoints per batch and can resume by skipping finished algorithms.
-- Mock results and CARLA results go in different files and different table columns.
-- Commands that may exceed your tool time limit must run in chunks writing intermediate CSVs.
-- Prefer small, reviewable commits: tests → G config → CARLA bring-up → runs → export.
-- When something fails or looks wrong (e.g. selftest off, nondeterminism, collisions at spawn), **stop and diagnose before running search**; report what you saw.
-- Do not claim a result you did not produce. If an acceptance criterion is not met, say which and why.
-
-## 8. Final report format (what to hand back)
-
-1. What was run (commands, versions, seeds, number of servers).
-2. Acceptance checklist per task: ✅ / ⚠️ with evidence (paths to files).
-3. Tables: algorithm comparison (CARLA), timing, G sensitivity, BTN agreement.
-4. Figures: recoverability map, point-of-no-return curves, descriptor-space scatter.
-5. Matched pairs (human-readable).
-6. Known issues, surprises, and what you would change in the definition of G, Π or Ω.
-7. Open questions for Andy/Victor (definition of G, library growth rule, Ω) and for Kent (θ schema from logs).
+## 7. Final report to hand back
+1. Runtime/versions/seeds/servers used. 2. Acceptance checklist per task (✅/⚠️/NOT EXECUTED) with paths. 3. Tables: anchors vs CARLA (residuals), G sensitivity, determinism, timing, per-family mining, evidence mix. 4. Figures: recoverability maps, feasible-delay sets, reveal-time transition. 5. Matched pairs (human-readable). 6. Known issues/surprises and any case template that failed its intended mechanism. 7. Open questions for Andy/Victor (reserve c, normalization, ε, library growth rule, Ω contents) and for Kent (θ schema extractable from logs).
