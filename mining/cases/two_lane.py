@@ -44,10 +44,12 @@ def rc03_spec(theta, cfg):
     return _base(theta, horizon, acts, hold_s=cfg.hold_s, post_s=cfg.post_maneuver_s)
 
 
-def rc03_library(with_bypass=True):
+def rc03_library(with_bypass=True, lc_time=2.0):
+    """lc_time=2.0 is the mock default; CARLA's measured braking (b ~ 6.2) beats a 2.0 s lane change at every tested speed, so the
+    CARLA runs pass an emergency lc_time (scripts/carla_core.py, library id rc03_carla_lc1.0)."""
     lib = [lambda: P.BrakeHold(), lambda: P.LaneFollow()]
     if with_bypass:
-        lib += [lambda: P.Bypass(side=-1, lc_time=2.0), lambda: P.Bypass(side=-1, lc_time=2.0, brake_s=0.4)]
+        lib += [lambda: P.Bypass(side=-1, lc_time=lc_time), lambda: P.Bypass(side=-1, lc_time=lc_time, brake_s=0.4)]
     return lib
 
 
