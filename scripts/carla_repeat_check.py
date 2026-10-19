@@ -68,7 +68,7 @@ def main():
         L.append(f"| {r['prefix_s']:.2f} | {r['G_old']:.5f} | {r['G_rep1']:.5f} | {r['G_rep2']:.5f} | {r['same_session_dG']:.5f} | "
                  f"{r['cross_session_dG']:.5f} | {r['label_old']} / {r['label_new']} |")
     L.append(f"\nMax same-session spread: {sm:.4f} m-equivalent.  Max cross-session spread (restart in between): {cm:.4f} m-equivalent "
-             f"(small sample of {len(rows)} scenes, one family).  sigma used for D4 = max(0.05 m, observed) = {out['sigma_m']:.4f} m "
+             f"(small sample of {len(rows)} scenes, one family).  RC12-check sigma = max(0.05 m, observed here) = {out['sigma_m']:.4f} m "
              f"= {out['sigma_m'] / q:.5f} in margin units.")
     open(f"{OUT}/repeat_spread.md", "w", encoding="utf-8", newline="\n").write("\n".join(L) + "\n")
     print("\n".join(L))

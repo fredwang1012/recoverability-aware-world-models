@@ -207,7 +207,7 @@ def figures(fam, outdir):
         from families import B_CAL, TAU_PLANT
         v = np.linspace(8, 24, 100)
         for tau, ls in ((0.0, "--"), (0.5, ":")):
-            ax.plot(v * (tau + TAU_PLANT) + v ** 2 / (2 * B_CAL) + 1.0, v, "k" + ls, lw=1, label=f"brake-only analytic boundary, tau {tau:g} s")
+            ax.plot(v * (tau + TAU_PLANT) + v ** 2 / (2 * B_CAL) + M.DEFAULT_V2.reserve_m, v, "k" + ls, lw=1, label=f"brake-only analytic boundary, tau {tau:g} s")
         ax.set_xlim(10, 60); ax.set_ylim(8, 24)
         ax.set_xlabel("gap (m)"); ax.set_ylabel("speed (m/s)")
         ax.set_title("Recoverability map (two-lane RC03, CARLA, a_lat_max 8, lc_time 2.0)\nall mined scenes, tau projected out")

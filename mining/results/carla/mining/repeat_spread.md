@@ -15,6 +15,6 @@
 | 2.00 | 0.03246 | 0.03246 | 0.03246 | 0.00000 | 0.00000 | R_REF / R_REF |
 | 2.05 | -0.09755 | -0.09755 | -0.09755 | 0.00000 | 0.00000 | U_LIBRARY / U_LIBRARY |
 
-Max same-session spread: 0.0000 m-equivalent.  Max cross-session spread (restart in between): 0.0000 m-equivalent (small sample of 10 scenes, one family).  sigma used for D4 = max(0.05 m, observed) = 0.0500 m = 0.01000 in margin units.
+Max same-session spread: 0.0000 m-equivalent.  Max cross-session spread (restart in between): 0.0000 m-equivalent (small sample of 10 scenes, one family).  RC12-check sigma = max(0.05 m, observed here) = 0.0500 m = 0.01000 in margin units.
 
 Caveat: this is 10 scenes of ONE family and 7 of them are saturated (G = 0.66826, the stopped-vehicle clearance), so it does NOT establish zero cross-session or same-session spread. The spread observed over the D4 repeats of mined scenes near the boundary is larger (see `corridor/d4.md`, `rc03/d4.md`: up to ~0.017 margin units) and sets sigma.
