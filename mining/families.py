@@ -47,6 +47,10 @@ class Family:
     def anchor(self, th, ctx):
         return None
 
+    def meta(self):
+        """Extra provenance written into every record row (library id, fixed plant parameters)."""
+        return {}
+
     def run(self, th, ctx):                                  # pragma: no cover
         raise NotImplementedError
 
@@ -73,7 +77,7 @@ class Corridor(Family):
 
     def run(self, th, ctx):
         return CO.run(lambda: ctx["factory"](th), th, ctx["cfg"], ctx["backend"], ctx["scope"], case_id="RC01",
-                      family_id="corridor", with_bypass=True)
+                      family_id="corridor", with_bypass=True, **ctx.get("run_kw", {}))
 
 
 class Rc03(Family):
@@ -92,7 +96,8 @@ class Rc03(Family):
         return th["gap_m"] / th["v_mps"], th["b_mps2"]
 
     def run(self, th, ctx):
-        return TL.run("RC03", lambda: ctx["factory"](th), th, ctx["cfg"], ctx["backend"], ctx["scope"], family="rc03")
+        return TL.run("RC03", lambda: ctx["factory"](th), th, ctx["cfg"], ctx["backend"], ctx["scope"], family="rc03",
+                      **ctx.get("run_kw", {}))
 
 
 class Rc07(Family):
@@ -107,10 +112,74 @@ class Rc07(Family):
 
     def run(self, th, ctx):
         th = dict(th, tau_s=0.25, b_mps2=6.0)
-        return TL.run("RC07", lambda: ctx["factory"](th), th, ctx["cfg"], ctx["backend"], ctx["scope"], family="rc07")
+        return TL.run("RC07", lambda: ctx["factory"](th), th, ctx["cfg"], ctx["backend"], ctx["scope"], family="rc07",
+                      **ctx.get("run_kw", {}))
 
 
 FAMILIES = {f.name: f for f in (Corridor(), Rc03(), Rc07())}
+
+
+# ----------------------------------------------------------------------------- CARLA variants (Task 5; mock families above unchanged)
+CARLA_DECEL = 6.19            # the only decel target with a distance-equivalent calibration (profile floor is 4.77)
+B_CAL, TAU_PLANT = 6.211, 0.05      # Task 3 calibration: measured brake_hold decel, one-tick plant onset (shared trace, not independent)
+CARLA_A_LAT_MAX = 8.0
+CARLA_LC_TIME = 2.0
+
+
+class CorridorCarla(Corridor):
+    """Corridor on CARLA: theta = (gap, v, tau, prefix); b is FIXED at the calibrated decel target (RULING 1), not searched.
+    Anchor uses the calibrated b_cal and tau_eff = tau + one-tick plant onset (constants shared with the calibration trace)."""
+    names = ["gap_m", "v_mps", "tau_s", "prefix_s"]
+    lo = np.array([8.0, 6.0, 0.0, 0.0])
+    hi = np.array([40.0, 20.0, 0.6, 0.6])
+
+    def _theta(self, v):
+        th = super()._theta(v)
+        th["b_mps2"] = CARLA_DECEL
+        return th
+
+    def descriptors(self, th):
+        return th["gap_m"] / th["v_mps"], th["prefix_s"]
+
+    def anchor(self, th, ctx):
+        c = ctx["cfg"].reserve_m
+        return corridor_anchor_m(th["gap_m"], th["v_mps"], th["tau_s"] + TAU_PLANT, th["prefix_s"], B_CAL, c)
+
+    def meta(self):
+        return {"library_id": "corridor_v1", "b_fixed_mps2": CARLA_DECEL}
+
+
+def corridor_anchor_m(gap, v, tau_eff, prefix, b, c):
+    """Signed analytic margin in metres: gap - v*(tau_eff+prefix) - v^2/(2b) - c."""
+    return gap - v * (tau_eff + prefix) - v ** 2 / (2 * b) - c
+
+
+class Rc03Carla(Rc03):
+    """RC03 on CARLA (RULING 2): lc_time 2.0 library, spec a_lat_max = 8 (dynamic-limit margin), b fixed at 6.19.  Under that limit a
+    bypass window exists only at higher speeds, hence v up to 24 and gap up to 60."""
+    names = ["gap_m", "v_mps", "tau_s"]
+    lo = np.array([10.0, 8.0, 0.0])
+    hi = np.array([60.0, 24.0, 0.5])
+
+    def _theta(self, v):
+        th = super()._theta(v)
+        th["b_mps2"] = CARLA_DECEL
+        return th
+
+    def descriptors(self, th):
+        return th["gap_m"] / th["v_mps"], th["tau_s"]
+
+    def meta(self):
+        return {"library_id": f"rc03_carla_lc{CARLA_LC_TIME:g}_full_alat{CARLA_A_LAT_MAX:g}", "lc_time": CARLA_LC_TIME,
+                "a_lat_max": CARLA_A_LAT_MAX, "b_fixed_mps2": CARLA_DECEL}
+
+    def run(self, th, ctx):
+        spec = dict(TL.rc03_spec(th, ctx["cfg"]), a_lat_max=CARLA_A_LAT_MAX)
+        return TL.run("RC03", lambda: ctx["factory"](th), th, ctx["cfg"], ctx["backend"], ctx["scope"], family="rc03",
+                      library=TL.rc03_library(True, CARLA_LC_TIME), spec=spec, **ctx.get("run_kw", {}))
+
+
+FAMILIES_CARLA = {f.name: f for f in (CorridorCarla(), Rc03Carla())}
 
 
 def mock_factory(th):
