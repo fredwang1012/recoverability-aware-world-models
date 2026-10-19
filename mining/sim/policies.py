@@ -329,3 +329,61 @@ class AbortIfClosing(LaneChangePrefix):
         if self.aborted:
             return self._abort(t)
         return self._commit(history[-1])
+
+
+# ----------------------------------------------------------------------------- partial observation (RC10, RC11, RC14)
+def _hidden_candidates(ob):
+    """Anonymous objects ahead of (or alongside) the ego within +-1.6 lane widths, nearest first (delivered observation only)."""
+    return sorted((o for o in ob.objs if o["dx"] > -(o["hl"] + ob.ego_hl + 1.0) and abs(o["dlat"]) <= 1.6 * ob.lane_w), key=lambda o: o["dx"])
+
+
+class SharedSlowdownThenBranch(Policy):
+    """RC10 witness (contingency-MPC idea on a finite tree): a SHARED slowdown trunk (full brake, in the ego lane) that is the same in
+    every world, then a BRANCH chosen from the delivered observation of the stopped vehicle: if it is in the ego lane, change to the
+    free adjacent (left) lane while braking continues (the trunk keeps buying time); if it is in the adjacent lane, stay in the lane
+    and keep braking.  Braking during the lane change is released once the ego speed is below `v_floor` (m/s): a stop in the middle of a
+    steered transition leaves a residual yaw, which the lane_follow terminal test would reject, so the slow ego completes the change at
+    constant speed.  memory=True latches the branch the first time the object has been delivered (decisive evidence stays causally
+    available); memory=False decides from the CURRENT frame only (RC14 foil: it forgets the object once it is occluded and returns to
+    the lane).  blind="change_left" ignores observations altogether (the info_tree blind(side=left, p) policy; named fixed_left)."""
+    terminal = "lane_follow"
+
+    def __init__(self, lc_time=2.0, trunk_brake=1.0, branch_brake=1.0, memory=True, v_floor=8.0, blind=None, **kw):
+        super().__init__(lc_time=lc_time, trunk_brake=trunk_brake, branch_brake=branch_brake, memory=memory, v_floor=v_floor, blind=blind, **kw)
+        self.name = "shared_slowdown_then_branch" if memory else "branch_current_frame_only"
+        if blind:
+            self.name = f"blind_{blind}"
+
+    def reset(self):
+        super().reset(); self.branch, self.released = None, False
+
+    @staticmethod
+    def _classify(ob):
+        c = _hidden_candidates(ob)
+        if not c:
+            return None
+        return "change_left" if abs(c[0]["dlat"]) < 0.5 * ob.lane_w else "stay"
+
+    def decide(self, history, t):
+        p, ob = self.params, history[-1]
+        if p["blind"]:
+            b = p["blind"]
+        elif p["memory"]:
+            if self.branch is None:
+                for h in history:
+                    b = self._classify(h)
+                    if b:
+                        self.branch = b
+                        break
+            b = self.branch
+        else:
+            b = self._classify(ob)
+        if b == "change_left":
+            if ob.v < p["v_floor"]:
+                self.released = True
+            if self.released:
+                return EgoCommand(long="keep", lat_target=-ob.lane_w, lc_time=p["lc_time"])
+            return EgoCommand(long="brake", brake_frac=p["branch_brake"], lat_target=-ob.lane_w, lc_time=p["lc_time"])
+        if b == "stay":
+            return EgoCommand(long="brake", brake_frac=p["branch_brake"], lat_target=0.0, lc_time=p["lc_time"])
+        return EgoCommand(long="brake", brake_frac=p["trunk_brake"], lat_target=None if p["memory"] else 0.0)

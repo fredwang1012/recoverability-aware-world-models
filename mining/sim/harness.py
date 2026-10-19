@@ -18,7 +18,10 @@ spec (what is built; intent lives elsewhere):
     route_goal {x} (optional): reported SEPARATELY as route_goal_completed (ego front bumper reached x without contact);
         it never enters the margin, the terminal test or the label.
 world (a mechanism, chosen once per episode):
-    name, actors {actor: {mode, ...}}, reveal {actor: t_reveal}, forget {actor: t_forget}
+    name, actors {actor: {mode, ...}}, reveal {actor: t_reveal}, forget {actor: t_forget},
+    spawn {actor: {x?, lat?, ...}} (optional): per-world override of the actor's initial placement (the hidden-actor mode of the
+        occlusion cases is WHERE the stopped vehicle is; the ground truth differs per world, the delivered observations do not
+        until the reveal).  Applied before the plant is built; never visible to policies.
 
 Policies receive only delivered Obs.  Trackers and the evaluator read ground truth.  Margins come from margin.py.
 """
@@ -108,7 +111,8 @@ def terminal_test(mode, ego_hist, speeds, dt, cfg, spec):
 def run_episode(plant, spec, policy, world, cfg=M.DEFAULT_V2, seed=0):
     dt = plant.dt
     ego_s = dict(spec["ego"], static=False)
-    states = plant.build({"actors": {"ego": ego_s, **spec["actors"]}, "road": spec["road"]})
+    sp_actors = {n: {**a, **world.get("spawn", {}).get(n, {})} for n, a in spec["actors"].items()}      # per-world placement override
+    states = plant.build({"actors": {"ego": ego_s, **sp_actors}, "road": spec["road"]})
     invalid = []
     E0 = M.obb_corners(states["ego"].x, states["ego"].lat, states["ego"].yaw, states["ego"].hl, states["ego"].hw)
     for n, a in states.items():
@@ -120,7 +124,7 @@ def run_episode(plant, spec, policy, world, cfg=M.DEFAULT_V2, seed=0):
     ctl = EgoController(plant.max_steer, ki_speed=ki, dt=dt, i0=hold_i.get("ego", 0.0))
     ctl.reset(states["ego"])
     scripted = {}
-    for n, a in spec["actors"].items():
+    for n, a in sp_actors.items():
         if a.get("static", False):
             continue
         scripted[n] = ScriptedActor(n, world.get("actors", {}).get(n, {"mode": "cruise"}), a["lat"], a["v"], plant.max_steer, dt,
@@ -236,7 +240,9 @@ def evaluate(plant_factory, spec, library, worlds, theta, case_id, family_id, sp
         policies=[p["name"] for p in descr], worlds=[w["name"] for w in worlds], R_raw=R_raw, R_norm=R_norm, terminal_ok=T,
         margin_config=dict(M.asdict(cfg)), evidence_scope=evidence_scope, seed=seed, policy_descriptors=descr,
         runtime=runtime or {}, physics_profile_id=physics_profile_id,
-        geometry={"spec": {k: spec[k] for k in ("ego", "actors", "road", "lane_w", "horizon_s", "delay", "a_lat_max", "a_comb_max", "a_comb_vmin", "route_goal") if k in spec}},
+        geometry={"spec": {k: spec[k] for k in ("ego", "actors", "road", "lane_w", "horizon_s", "delay", "a_lat_max", "a_comb_max", "a_comb_vmin", "route_goal") if k in spec},
+                  **({"world_spec": [{k: w[k] for k in ("name", "spawn", "reveal", "forget") if k in w} for w in worlds]}
+                     if any(k in w for w in worlds for k in ("spawn", "reveal", "forget")) else {})},
         timestamps={k: v["timestamps"] for k, v in runs.items()},
         events={k: {"termination": v["termination"], "events": v["events"]} for k, v in runs.items()},
         traces={k: {"final": v["final"], "margin": v["margin"], **({"route_goal_completed": v["route_goal_completed"]}
