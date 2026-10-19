@@ -43,20 +43,17 @@ def main():
     finite = sorted(p for p, r in old.items() if all(x != "-inf" for row in r["R_raw"] for x in row))
     pick = finite[:: max(1, len(finite) // 10)][:12]
     rows = []
-    try:
-        for p in pick:
-            r1, r2 = (cc.rc12_rec(ctx, p).to_json() for _ in range(2))
-            fin = lambda r: next(iter(r["traces"].values()))["final"]
-            f0, f1, f2 = fin(old[p]), fin(r1), fin(r2)
-            same = spread(r1["R_raw"], r2["R_raw"], q)
-            cross = spread(old[p]["R_raw"], r1["R_raw"], q)
-            rows.append({"prefix_s": p, "G_old": old[p]["R_raw"][0][0], "G_rep1": r1["R_raw"][0][0], "G_rep2": r2["R_raw"][0][0],
-                         "same_session_dG": same[0], "cross_session_dG": cross[0], "same_session_m": same[1], "cross_session_m": cross[1],
-                         "same_final": [f1, f2], "old_final": f0,
-                         "label_old": old[p]["evidence_class"], "label_new": r1["evidence_class"]})
-            print(rows[-1]["prefix_s"], rows[-1]["same_session_dG"], rows[-1]["cross_session_dG"], flush=True)
-    finally:
-        pass
+    for p in pick:
+        r1, r2 = (cc.rc12_rec(ctx, p).to_json() for _ in range(2))
+        fin = lambda r: next(iter(r["traces"].values()))["final"]
+        f0, f1, f2 = fin(old[p]), fin(r1), fin(r2)
+        same = spread(r1["R_raw"], r2["R_raw"], q)
+        cross = spread(old[p]["R_raw"], r1["R_raw"], q)
+        rows.append({"prefix_s": p, "G_old": old[p]["R_raw"][0][0], "G_rep1": r1["R_raw"][0][0], "G_rep2": r2["R_raw"][0][0],
+                     "same_session_dG": same[0], "cross_session_dG": cross[0], "same_session_m": same[1], "cross_session_m": cross[1],
+                     "same_final": [f1, f2], "old_final": f0,
+                     "label_old": old[p]["evidence_class"], "label_new": r1["evidence_class"]})
+        print(rows[-1]["prefix_s"], rows[-1]["same_session_dG"], rows[-1]["cross_session_dG"], flush=True)
     sm = max(r["same_session_m"] for r in rows)
     cm = max(r["cross_session_m"] for r in rows)
     out = {"n_scenes": len(rows), "same_session_max_m": sm, "cross_session_max_m": cm, "q_clear": q,

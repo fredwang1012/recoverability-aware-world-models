@@ -204,6 +204,10 @@ def pair_ok(p):
     return p["unrecoverable_side"]["evidence_class"].startswith("U_") and p["recoverable_side"]["evidence_class"] == "R_REF"
 
 
+def pair_key(p):
+    return json.dumps([p["unrecoverable_side"]["theta"], p["recoverable_side"]["theta"]], sort_keys=True)
+
+
 def pairs_md(fam, all_pairs):
     L = [f"# {fam.name}: matched pairs (bisect, both members re-labelled with the full R matrix)\n",
          "Each pair changes ONE factor (same split_group, same other factors).  `verified` = unrecoverable side is U_* and the recoverable "
@@ -211,7 +215,11 @@ def pairs_md(fam, all_pairs):
          "0 means the CARLA flip sits on the analytic boundary.\n",
          "| pair | description | unrecoverable side | recoverable side | verified | anchor@mid (m) |", "|---|---|---|---|---|---|"]
     for _, ps in all_pairs:
+        seen = set()
         for p in ps:
+            if pair_key(p) in seen:                      # bisect can re-pick the same chain; list each distinct pair once per seed
+                continue
+            seen.add(pair_key(p))
             a = p.get("anchor_mid_m")
             L.append(f"| {p['pair_id']} | {p['description']} | {p['unrecoverable_side']['evidence_class']} | "
                      f"{p['recoverable_side']['evidence_class']} | {pair_ok(p)} | {'n/a' if a is None else f'{a:+.2f}'} |")
@@ -241,7 +249,7 @@ def summarise(fam, ctx, args, outdir):
                       "near_boundary": sum(abs(r["V"]) < EDGE for r in rows),
                       "boundary_dist_m": float(np.mean(sorted(anch)[:20])) if anch else np.nan,
                       "label_vs_anchor_agree": float(np.mean(agree)) if agree else np.nan,
-                      "pairs": len(pairs), "pairs_verified": sum(pair_ok(p) for p in pairs),
+                      "pairs": len(pairs), "distinct_pairs": len({pair_key(p) for p in pairs}), "pairs_verified": sum(pair_ok(p) for p in pairs),
                       "pair_mid_anchor_abs_m": float(np.mean(np.abs(amid))) if amid else np.nan,
                       "pair_mid_anchor_signed_m": float(np.mean(amid)) if amid else np.nan})
     return pd.DataFrame(L), mix, all_pairs
@@ -256,6 +264,7 @@ def md(df, fam, ctx, args, mix=None):
     fals = ", ".join(a for a in m.index if a in FALSIFIERS) or "-"
     head = (f"## {fam.name} mining - backend: {ctx['backend'].upper()}"
             f"{' (MOCK plant: kinematic stand-in, NOT CARLA)' if ctx['backend'] == 'mock' else ''}\n\n"
+            f"bisect: {args.bisect_iters or 4} bisection iterations per chain; "
             f"{n} seed(s) x {args.budget} scenes per algorithm ({fb} for falsifiers: {fals}); mean +/- 95% CI (n = {n} seeds, CIs are rough). "
             f"near_boundary = |V_search| < {EDGE}; boundary_dist_m = mean |analytic G| of the 20 scenes closest to the boundary "
             f"(corridor only; reflects sampling density near the boundary, not a localisation error); "

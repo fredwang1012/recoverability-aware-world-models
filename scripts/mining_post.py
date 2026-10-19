@@ -6,8 +6,8 @@ Task 5 post-processing for CARLA mining (D4 repeats + recoverability maps), run 
 
 D4: scenes whose label-grade value V (max over policies of min over worlds of R_raw) is within 1 sigma of the threshold eps get 3 matched
 repeats (same scene, fresh episodes).  If the sign of V - eps (or the R/U label) changes among original + repeats, the scene is marked
-UNRESOLVED.  sigma = max(0.05 m, observed repeat spread) / q_clear (from results/carla/mining/repeat_spread.json).  The strict set
-(|V - eps| <= sigma) is expected to be tiny for a deterministic simulator, so the closest-to-boundary scenes and all pair members are also
+UNRESOLVED.  sigma = max(0.05 m, RC12 repeat check, observed spread of all D4 repeats) in margin units.  Repeats are not always
+bit-identical.  The strict set (|V - eps| <= sigma) is recomputed with that sigma until stable; in addition the closest-to-boundary scenes and all pair members are also
 repeated (extended set, reported separately, not part of the D4 rule).
 """
 import argparse
@@ -21,6 +21,7 @@ sys.path.insert(0, HERE)
 import numpy as np
 
 import mine_cases as MC
+import margin as M
 
 spec = importlib.util.spec_from_file_location("carla_core", os.path.join(HERE, "carla_core.py"))
 cc = importlib.util.module_from_spec(spec)
@@ -45,6 +46,22 @@ def near_threshold(vals, sigma, eps=0.0):
     return sorted(idx, key=lambda i: abs(vals[i] - eps))
 
 
+def spread_of(d):
+    """max - min of the finite V values of one D4 row (original + repeats); 0 if fewer than two finite values."""
+    vs = [v for v in [d["V0"]] + [r["V"] for r in d["reps"]] if v is not None and np.isfinite(v)]
+    return max(vs) - min(vs) if len(vs) > 1 else 0.0
+
+
+def observed_spread(rows):
+    """Largest same-scene V spread over all D4 rows (margin units)."""
+    return max([spread_of(d) for d in rows] or [0.0])
+
+
+def load_d4(outdir):
+    p = f"{outdir}/d4_repeats.jsonl"
+    return [json.loads(l) for l in open(p)] if os.path.exists(p) else []
+
+
 def load_records(outdir):
     """(records, pair members) from the mining directory, de-duplicated by theta."""
     recs, seen = [], set()
@@ -67,8 +84,8 @@ def load_records(outdir):
 
 
 # ----------------------------------------------------------------------------- D4
-def run_d4(fam, ctx, outdir, sigma_m, q_clear):
-    sigma = sigma_m / q_clear
+def run_d4(fam, ctx, outdir, sigma):
+    """sigma in margin units."""
     recs, members = load_records(outdir)
     pool, seen = [], set()
     for r in recs + members:
@@ -111,16 +128,18 @@ def run_d4(fam, ctx, outdir, sigma_m, q_clear):
     return rows, sigma, len(pool)
 
 
-def d4_md(fam, rows, sigma_m, sigma, q, npool, rep):
+def d4_md(fam, rows, sigma_m, sigma, q, npool, rep, obs_by_fam):
     n_strict = sum(r["strict"] for r in rows)
     L = [f"## D4 repeats - {fam.name} (CARLA)\n",
          f"sigma = max(0.05 m, observed repeat spread) = {sigma_m:.4f} m = {sigma:.5f} in margin units (clearance metres / q_clear = {q}). "
-         f"Repeat spread source: `results/carla/mining/repeat_spread.json`: same-session max {rep['same_session_max_m']:.4f} m-equivalent, "
-         f"cross-session (server restart in between) max {rep['cross_session_max_m']:.4f} m-equivalent over {rep['n_scenes']} re-run RC12 scenes; "
-         "cross-session repeats were NOT measured systematically (small sample, one family).\n",
+         f"Observed same-scene V spread over D4 repeats (original mining value + {REPEATS} repeats, all in the current server session, same theta and seed): "
+         + ", ".join(f"{k} {v:.5f} ({v * q:.4f} m)" for k, v in obs_by_fam.items()) +
+         ". Repeats are NOT bit-identical: a minority of scenes show an occasional different value in one episode. "
+         f"The small RC12 check (`repeat_spread.md`: {rep['n_scenes']} scenes of one family, mostly saturated, all measured spreads 0) does not establish zero cross-session spread; "
+         "cross-session repeats were NOT measured systematically.\n",
          f"Pool: {npool} distinct scenes (all algorithms + pair members). Strict D4 set (|V - eps| <= sigma): **{n_strict}** scenes. "
          f"Extended set (the {EXTENDED_NEAREST} closest scenes plus all pair members, repeated for evidence; not part of the D4 rule): {len(rows) - n_strict} more scenes. "
-         f"Each scene: original + {REPEATS} matched repeats (same scene, fresh episodes, same session).  "
+         f"Each scene: original + {REPEATS} matched repeats (same scene, fresh episodes, same session).  Rows with a spread > 0: {sum(spread_of(r) > 0 for r in rows)} of {len(rows)}.  "
          f"**UNRESOLVED** (sign of V - eps or R/U label changes): {sum(r['unresolved'] for r in rows)} of {len(rows)}.\n",
          "| set | theta | V (orig) | V (repeats) | label | UNRESOLVED |", "|---|---|---|---|---|---|"]
     for r in sorted(rows, key=lambda r: (not r["strict"], abs(r["V0"]) if r["V0"] is not None and np.isfinite(r["V0"]) else 99)):
@@ -151,7 +170,7 @@ def figures(fam, outdir):
                           label=f"{'R_REF (recoverable)' if lab == 'R_REF' else lab + (' (U_*)' if lab == 'U' else '')} n={len(sel)}")
         from families import B_CAL, TAU_PLANT
         v = np.linspace(6, 20, 100)
-        c = 1.0
+        c = M.DEFAULT_V2.reserve_m
         lo = [v * TAU_PLANT + v ** 2 / (2 * B_CAL) + c, v * (TAU_PLANT + 1.2) + v ** 2 / (2 * B_CAL) + c]
         ax[0].plot(lo[0], v, "k--", lw=1, label="analytic boundary, tau + prefix = 0")
         ax[0].plot(lo[1], v, "k:", lw=1, label="analytic boundary, tau + prefix = 1.2 s (max)")
@@ -179,7 +198,6 @@ def figures(fam, outdir):
         for r in pts:
             k = MC.label_kind(r["evidence_class"])
             if k == "R":
-                m = cc.margins(r)
                 k = "bypass" if cc.rc03_contrast(r) else "brake"
             if k in groups:
                 groups[k][0].append(r)
@@ -216,11 +234,17 @@ def main():
         print("figure scenes:", figures(fam, outdir))
     if a.d4:
         rep = json.load(open("results/carla/mining/repeat_spread.json"))
-        sigma_m = max(0.05, rep["same_session_max_m"], rep["cross_session_max_m"])
         ctx = MC.make_ctx(a)
         q = ctx["cfg"].q_clear
-        rows, sigma, npool = run_d4(fam, ctx, outdir, sigma_m, q)
-        text = d4_md(fam, rows, sigma_m, sigma, q, npool, rep)
+        dirs = {f: f"results/carla/mining/{f}" for f in ("corridor", "rc03")}
+        for _ in range(4):               # sigma from the observed spread of ALL D4 repeats; repeat newly in-band scenes until stable
+            obs = max(observed_spread(load_d4(d)) for d in dirs.values())
+            sigma = max(0.05 / q, rep["same_session_max_m"] / q, rep["cross_session_max_m"] / q, obs)
+            rows, _, npool = run_d4(fam, ctx, outdir, sigma)
+            if max(observed_spread(load_d4(d)) for d in dirs.values()) <= sigma + 1e-12:
+                break
+        obs_by_fam = {f: observed_spread(load_d4(d)) for f, d in dirs.items()}
+        text = d4_md(fam, rows, sigma * q, sigma, q, npool, rep, obs_by_fam)
         open(f"{outdir}/d4.md", "w", encoding="utf-8", newline="\n").write(text)
         print(text)
 

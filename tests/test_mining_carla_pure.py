@@ -88,3 +88,12 @@ def test_profile_mix_refused():
         MC.check_profile({"physics_profile_id": "pp_old"}, ctx, "x.jsonl")
     MC.check_profile({"physics_profile_id": "pp_new"}, ctx, "x.jsonl")
     MC.check_profile({"physics_profile_id": None}, {"backend": "mock"}, "x.jsonl")      # mock: no check
+
+
+def test_observed_spread_and_pair_key():
+    rows = [{"V0": 0.004, "reps": [{"V": 0.004}, {"V": 0.021}, {"V": 0.004}]}, {"V0": -math.inf, "reps": [{"V": -math.inf}]},
+            {"V0": 0.1, "reps": [{"V": None}]}]
+    assert abs(MP.spread_of(rows[0]) - 0.017) < 1e-12 and MP.spread_of(rows[1]) == 0 and MP.spread_of(rows[2]) == 0
+    assert abs(MP.observed_spread(rows) - 0.017) < 1e-12 and MP.observed_spread([]) == 0
+    p = {"unrecoverable_side": {"theta": {"a": 1}}, "recoverable_side": {"theta": {"a": 2}}}
+    assert MC.pair_key(p) == MC.pair_key(dict(p))
