@@ -1,0 +1,51 @@
+{
+  "server_version": "0.9.16",
+  "client_version": "0.9.16",
+  "map": "Carla/Maps/OpenDriveMap",
+  "map_hash": "51d8e45dfb9519c2",
+  "settings": {
+    "synchronous_mode": true,
+    "fixed_delta_seconds": 0.05,
+    "substepping": true,
+    "max_substep_delta_time": 0.01,
+    "max_substeps": 10,
+    "no_rendering_mode": true
+  },
+  "site": {
+    "origin_xyz": [
+      250.0,
+      5.25,
+      0.0
+    ],
+    "road_yaw": -0.0,
+    "lane_w": 3.5,
+    "n_lanes_same_dir": 2
+  },
+  "python": "3.12.15",
+  "numpy": "2.5.4",
+  "carla_client_wheel": "n/a",
+  "gpu": "NVIDIA GeForce RTX 3060 Laptop GPU, 6144 MiB, 617.42",
+  "blueprints": {
+    "ego": "vehicle.tesla.model3",
+    "static": "vehicle.audi.a2",
+    "mover": "vehicle.mini.cooper"
+  },
+  "physics_profile_id": "pp_381b4c6e55",
+  "margin_config": {
+    "reserve_m": 1.0,
+    "q_clear": 5.0,
+    "q_road": 1.0,
+    "q_dyn": 1.0,
+    "q_term": 1.0,
+    "eps": 0.0,
+    "horizon_s": 8.0,
+    "hold_s": 4.0,
+    "post_maneuver_s": 4.0,
+    "swept_substeps": 20,
+    "swept_step_m": 0.25,
+    "search_clip": 1.0,
+    "stop_speed": 0.1
+  },
+  "dt": 0.05,
+  "port": 2000
+}

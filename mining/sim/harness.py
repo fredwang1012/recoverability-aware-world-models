@@ -73,13 +73,16 @@ def run_episode(plant, spec, policy, world, cfg=M.DEFAULT_V2, seed=0):
         if n != "ego" and M.signed_distance(E0, M.obb_corners(a.x, a.lat, a.yaw, a.hl, a.hw)) < 0:
             invalid.append(f"spawn_overlap:{n}")
 
-    ctl = EgoController(plant.max_steer)
+    ki = getattr(plant, "speed_ki", 0.0)                       # >0 only for the drag-limited CARLA plant
+    hold_i = getattr(plant, "hold_i", {})                      # throttle feed-forward reached at the end of warm-up
+    ctl = EgoController(plant.max_steer, ki_speed=ki, dt=dt, i0=hold_i.get("ego", 0.0))
     ctl.reset(states["ego"])
     scripted = {}
     for n, a in spec["actors"].items():
         if a.get("static", False):
             continue
-        scripted[n] = ScriptedActor(n, world.get("actors", {}).get(n, {"mode": "cruise"}), a["lat"], a["v"], plant.max_steer, dt)
+        scripted[n] = ScriptedActor(n, world.get("actors", {}).get(n, {"mode": "cruise"}), a["lat"], a["v"], plant.max_steer, dt,
+                                  ki=ki, i0=hold_i.get(n, 0.0))
     d = spec.get("delay", {})
     feed = ObservationFeed(spec["lane_w"], spec.get("obs_hz", 20.0), d.get("obs", 0.0), world.get("reveal"), world.get("forget"), dt)
     pipe = CommandPipeline(d.get("plan", 0.0), d.get("act", 0.0), dt)

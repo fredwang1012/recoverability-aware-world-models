@@ -11,16 +11,17 @@ time or observed geometry, never re-drawn per tick.  Modes:
     accelerate      : constant acceleration a
 Parameters ride in the world, e.g. {"adj": {"mode": "yield", "v_yield": 8.0, "react_s": 0.5}}.
 """
-from .trackers import hold_lane_control
+from .trackers import SpeedPI, hold_lane_control
 from .types import ActorState
 
 
 class ScriptedActor:
-    def __init__(self, name, params, lane_lat, v0, max_steer_rad, dt):
+    def __init__(self, name, params, lane_lat, v0, max_steer_rad, dt, ki=0.0, i0=0.0):
         self.name, self.p, self.lane_lat, self.v_ref = name, params, lane_lat, v0
         self.mode = params.get("mode", "cruise")
         self.max_steer, self.dt = max_steer_rad, dt
         self.t_trigger = None
+        self.pi = SpeedPI(0.6, ki, dt, i0) if ki else None
 
     def control(self, st: ActorState, ego: ActorState, t: float):
         m = self.mode
@@ -35,4 +36,4 @@ class ScriptedActor:
                 self.t_trigger = t
             if self.t_trigger is not None and t >= self.t_trigger + self.p.get("react_s", 0.5):
                 self.v_ref = max(self.v_ref - self.p.get("b", 3.0) * self.dt, self.p.get("v_yield", 0.0))
-        return hold_lane_control(st, self.lane_lat, self.v_ref, self.max_steer)
+        return hold_lane_control(st, self.lane_lat, self.v_ref, self.max_steer, pi=self.pi)

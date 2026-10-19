@@ -134,11 +134,15 @@ def measure_brake(plant, friction, torque, v0=20.0, steer=0.0, diag=None, _retry
     if v[0] < 0.9 * v0 and _retry > 0:                           # initial speed was lost at spawn: invalid run, redo
         print(f"  start-speed check failed (v_start={v[0]:.2f} < 0.9*{v0}); retrying", flush=True)
         return measure_brake(plant, friction, torque, v0, steer, diag, _retry - 1)
+    start_ok = bool(v[0] >= 0.9 * v0)
     sel = (v <= 0.9 * v0) & (v >= 0.2 * v0)
     if diag is not None:
         diag.update({"friction": friction, "torque": torque, "trace_len": int(len(v)), "v_start": float(v[0]), "v_min": float(v.min()),
                      "n_sel": int(sel.sum()), "sel_lt_5": bool(sel.sum() < 5), "max_abs_yaw": float(np.max(np.abs(yaw))),
-                     "max_abs_lat": float(np.max(np.abs(lat))), "v_end": float(v[-1])})
+                     "max_abs_lat": float(np.max(np.abs(lat))), "v_end": float(v[-1]), "start_ok": start_ok})
+    if not start_ok:                                             # retries exhausted with an invalid start: never enters the table
+        print(f"  invalid start (v_start={v[0]:.2f} < 0.9*{v0}) after retries; no fit", flush=True)
+        return None
     if sel.sum() < 5:
         return None
     slope, icpt = np.polyfit(t[sel], v[sel], 1)
@@ -187,7 +191,7 @@ def measure_tracking(plant, v0=12.0, lc_time=3.0):
             "final_lat_m": float(e.lat), "target_lat_m": -TL.LANE_W}
 
 
-TORQUE_FACTORS = (0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0)
+TORQUE_FACTORS = (0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0)
 FRICTION_FIXED = 5.0                        # braking is torque-limited here (3.5 / 5.0 / 8.0 gave the same decel at fixed torque)
 FRICTION_SWEEP = (0.6, 1.0, 1.5, 2.5, 3.5, 5.0)
 
@@ -297,6 +301,7 @@ def cmd_selftest(a):
     client, world, site = connect(a.host, a.port, a.town)
     prof = json.load(open(f"{OUT}/physics_profile.json")) if os.path.exists(f"{OUT}/physics_profile.json") else None
     target = float(np.median(prof["decel"])) if prof else None
+    near6 = float(min(prof["decel"], key=lambda d: abs(d - 6.0))) if prof else None
     mk = lambda: make_plant(client, world, site, decel=target)
     lines, ok_all = [f"CARLA selftest {time.strftime('%Y-%m-%d %H:%M:%S')}  map={world.get_map().name}  lane_w={site.lane_w:.2f}  "
                      f"physics_profile={prof['id'] if prof else 'NONE (run calibrate first)'}"], True
@@ -311,15 +316,16 @@ def cmd_selftest(a):
     check("keep holds speed", abs(v[-1] - v[0]) < 0.5 and max(abs(x - v[0]) for x in v) < 0.5,
           f"v0={v[0]:.2f} v_end={v[-1]:.2f} max|dv|={max(abs(x - v[0]) for x in v):.2f} m/s over {len(v) * DT:.1f} s")
     spec = CO.spec({"gap_m": 60.0, "v_mps": 20.0, "tau_s": 0.0})
-    r = _ep(mk, spec, P.BrakeHold(), CO.WORLD)
-    t = np.array([e[0] for e in r.ego]); vv = np.array([e[4] for e in r.ego])
-    sel = (vv <= 0.9 * 20) & (vv >= 0.2 * 20)
-    dec = -np.polyfit(t[sel], vv[sel], 1)[0] if sel.sum() > 5 else float("nan")
-    if target:
-        check("emergency brake decel within 10% of calibrated target", abs(dec - target) <= 0.10 * target,
-              f"measured {dec:.2f} m/s^2, target {target:.2f}")
-    else:
-        lines.append(f"[INFO] emergency brake decel measured {dec:.2f} m/s^2 (no calibration, no target)")
+    for label, tgt in (("profile median", target), ("nearest 6.0", near6)):
+        r = _ep(lambda: make_plant(client, world, site, decel=tgt), spec, P.BrakeHold(), CO.WORLD)
+        t = np.array([e[0] for e in r.ego]); vv = np.array([e[4] for e in r.ego])
+        sel = (vv <= 0.9 * 20) & (vv >= 0.2 * 20)
+        dec = -np.polyfit(t[sel], vv[sel], 1)[0] if sel.sum() > 5 else float("nan")
+        if tgt:
+            check(f"emergency brake decel within 10% of calibrated target ({label})", abs(dec - tgt) <= 0.10 * tgt,
+                  f"measured {dec:.2f} m/s^2, target {tgt:.2f}, v_start={vv[0]:.2f}")
+        else:
+            lines.append(f"[INFO] emergency brake decel measured {dec:.2f} m/s^2 (no calibration, no target)")
     r = _ep(mk, _clear_spec(12.0, 9.0), P.Bypass(side=-1, lc_time=3.0))
     lat = r.ego[-1][2]
     check("left lane change ends at -lane_w +/- 0.3 m", abs(lat + site.lane_w) < 0.3, f"lat_end={lat:.2f} m (target {-site.lane_w:.2f})")
@@ -366,6 +372,8 @@ def cmd_determinism(a):
     L = ["## CARLA determinism (same case run repeatedly; tolerance 0.05 m / 0.05 m/s)", "",
          "| case | comparison | max dx (m) | max dlat (m) | max dv (m/s) |", "|---|---|---|---|---|"]
     L += [f"| {r[0]} | {r[1]} | {r[2]:.4f} | {r[3]:.4f} | {r[4]:.4f} |" for r in rows]
+    if len(ports) < 2:
+        L += ["", "Cross-server check: NOT EXECUTED (only one CARLA server fits in the 6 GB GPU); this result covers same-server repeats only."]
     L += ["", "RESULT: " + ("PASS" if ok else "FAIL - do not run any search")]
     _write(f"{OUT}/determinism.md", "\n".join(L) + "\n")
     print("\n".join(L))

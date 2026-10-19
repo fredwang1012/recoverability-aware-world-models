@@ -1,0 +1,9 @@
+CARLA selftest 2026-10-19 01:37:34  map=Carla/Maps/OpenDriveMap  lane_w=3.50  physics_profile=pp_381b4c6e55
+[PASS] keep holds speed: v0=11.97 v_end=11.97 max|dv|=0.07 m/s over 8.1 s
+[PASS] emergency brake decel within 10% of calibrated target (profile median): measured 9.07 m/s^2, target 8.98, v_start=20.17
+[PASS] emergency brake decel within 10% of calibrated target (nearest 6.0): measured 6.23 m/s^2, target 6.19, v_start=20.17
+[PASS] left lane change ends at -lane_w +/- 0.3 m: lat_end=-3.50 m (target -3.50)
+[PASS] measured bumper gap at t0 equals the declared gap (0.1 m): measured clearances {blk_r: 17.999, blk_l: 18.064} m (declared 18.0)
+[PASS] no spawn overlap / no invalid reasons: invalid=[]
+
+RESULT: PASS

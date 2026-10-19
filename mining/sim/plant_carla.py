@@ -21,7 +21,7 @@ import os
 
 import numpy as np
 
-from .trackers import hold_lane_control
+from .trackers import SpeedPI, hold_lane_control
 from .types import ActorState, DT, Snapshot
 
 DEFAULT_BP = {"ego": "vehicle.tesla.model3"}
@@ -48,11 +48,12 @@ class CarlaPlant:
     name = "carla"
 
     def __init__(self, client, world, site, decel=None, profile_path="results/carla/physics_profile.json", dt=DT,
-                 warm_s=1.0, bp_ego="vehicle.tesla.model3"):
+                 warm_s=2.0, bp_ego="vehicle.tesla.model3", speed_ki=0.3):
         import carla
         self.C, self.client, self.world, self.site, self.dt = carla, client, world, site, dt
         self.map, self.lib = world.get_map(), world.get_blueprint_library()
         self.warm_s, self.bp_ego = warm_s, bp_ego
+        self.speed_ki, self.hold_i = speed_ki, {}
         self.decel_target = decel
         self.profile_data = json.load(open(profile_path)) if os.path.exists(profile_path) else None
         self.actors, self.byid, self.k = {}, {}, 0
@@ -165,23 +166,28 @@ class CarlaPlant:
         self.byid = {a.id: n for n, a in self.actors.items()}
         # warm-up approach with simple cruise + lane hold; static actors braked
         ref = {"ego": (ego["lat"], ego["v"]), **{n: (a["lat"], a.get("v", 0.0)) for n, a in others.items()}}
-        for _ in range(int(round(self.warm_s / self.dt))):
+        pis = {n: SpeedPI(0.6, self.speed_ki, self.dt) for n in self.actors if n not in self.static}
+        for wk in range(int(round(self.warm_s / self.dt))):
             ctl = {}
             for n, a in self.actors.items():
                 if n in self.static:
                     a.apply_control(C.VehicleControl(hand_brake=True, brake=1.0))
                     continue
                 st = self._state(a)
-                t, b, s = hold_lane_control(st, ref[n][0], ref[n][1], self.max_steer)
-                a.apply_control(C.VehicleControl(throttle=t, brake=b, steer=s))
+                t, b, s = hold_lane_control(st, ref[n][0], ref[n][1], self.max_steer, pi=pis[n])
+                # the single-gear drivetrain starts in neutral (gear 0): the first throttle would engage the clutch on a stationary
+                # engine and drag the car down by ~1/3 of its speed.  Engage gear 1 on the first warm-up tick so the engine spin-up
+                # happens (and is absorbed by the cruise controller) before t0.
+                a.apply_control(C.VehicleControl(throttle=t, brake=b, steer=s, **({"manual_gear_shift": True, "gear": 1} if wk == 0 else {})))
             self.world.tick()
+        self.hold_i = {n: p.i for n, p in pis.items()}           # hand the learned feed-forward throttle to the episode controllers
         # re-place STATIC blockers relative to the MEASURED ego bumper so the declared bumper gap holds exactly
         me = self._state(self.actors["ego"])
         for n in self.static:
             a = others[n]
             gap = (a["x"] - a["hl"]) - (ego["x"] + ego["hl"])
             sa = self._state(self.actors[n])
-            x_new = me.x + me.hl + gap + sa.hl
+            x_new = me.x + me.v * self.dt + me.hl + gap + sa.hl      # the ego advances one more tick before t0
             loc = self._loc(x_new, a["lat"])
             self.actors[n].set_transform(C.Transform(C.Location(loc.x, loc.y, self.actors[n].get_transform().location.z),
                                                     C.Rotation(yaw=self.site.road_yaw)))
