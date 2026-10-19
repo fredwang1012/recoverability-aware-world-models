@@ -20,3 +20,29 @@ def test_integral_builds_feedforward_and_is_bounded():
     assert pi.i == 1.0                                  # anti-windup clip
     thr, brk = pi(-0.1)
     assert thr > 0 and brk == 0.0                       # feed-forward keeps throttle on for a small overspeed
+
+
+def test_brake_to_keep_keeps_rescaled_feedforward():
+    from sim.trackers import EgoController
+    from sim.types import ActorState, EgoCommand
+    st = ActorState(0.0, 0.0, 0.0, 10.0, 2.3, 0.95)
+    ctl = EgoController(0.5, ki_speed=0.3, i0=0.4)
+    ctl.reset(st)
+    ctl.apply(EgoCommand(long="brake"), st, 0.0)
+    slow = ActorState(0.0, 0.0, 0.0, 5.0, 2.3, 0.95)
+    ctl.apply(EgoCommand(long="keep"), slow, 1.0)
+    assert abs(ctl.pi.i - 0.2) < 1e-9                     # 0.4 * 5/10
+    assert ctl.v_hold == 5.0
+    thr, brk, _ = ctl.control(slow, 1.0)
+    assert thr > 0.15 and brk == 0.0                      # no deceleration kick on resume
+
+
+def test_brake_to_keep_ki_zero_matches_old_behaviour():
+    from sim.trackers import EgoController
+    from sim.types import ActorState, EgoCommand
+    st = ActorState(0.0, 0.0, 0.0, 10.0, 2.3, 0.95)
+    ctl = EgoController(0.5)
+    ctl.reset(st)
+    ctl.apply(EgoCommand(long="brake"), st, 0.0)
+    ctl.apply(EgoCommand(long="keep"), st, 1.0)
+    assert ctl.control(st, 1.0)[:2] == (0.0, 0.0)

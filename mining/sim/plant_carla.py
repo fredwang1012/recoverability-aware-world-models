@@ -167,6 +167,7 @@ class CarlaPlant:
         # warm-up approach with simple cruise + lane hold; static actors braked
         ref = {"ego": (ego["lat"], ego["v"]), **{n: (a["lat"], a.get("v", 0.0)) for n, a in others.items()}}
         pis = {n: SpeedPI(0.6, self.speed_ki, self.dt) for n in self.actors if n not in self.static}
+        v_prev = ego["v"]
         for wk in range(int(round(self.warm_s / self.dt))):
             ctl = {}
             for n, a in self.actors.items():
@@ -174,6 +175,8 @@ class CarlaPlant:
                     a.apply_control(C.VehicleControl(hand_brake=True, brake=1.0))
                     continue
                 st = self._state(a)
+                if n == "ego":
+                    v_prev = st.v
                 t, b, s = hold_lane_control(st, ref[n][0], ref[n][1], self.max_steer, pi=pis[n])
                 # the single-gear drivetrain starts in neutral (gear 0): the first throttle would engage the clutch on a stationary
                 # engine and drag the car down by ~1/3 of its speed.  Engage gear 1 on the first warm-up tick so the engine spin-up
@@ -183,11 +186,13 @@ class CarlaPlant:
         self.hold_i = {n: p.i for n, p in pis.items()}           # hand the learned feed-forward throttle to the episode controllers
         # re-place STATIC blockers relative to the MEASURED ego bumper so the declared bumper gap holds exactly
         me = self._state(self.actors["ego"])
+        a_ego = (me.v - v_prev) / self.dt
         for n in self.static:
             a = others[n]
             gap = (a["x"] - a["hl"]) - (ego["x"] + ego["hl"])
             sa = self._state(self.actors[n])
-            x_new = me.x + me.v * self.dt + me.hl + gap + sa.hl      # the ego advances one more tick before t0
+            # the ego advances one more tick before t0: constant-acceleration extrapolation from the last two warm-up speeds
+            x_new = me.x + me.v * self.dt + 0.5 * a_ego * self.dt ** 2 + me.hl + gap + sa.hl
             loc = self._loc(x_new, a["lat"])
             self.actors[n].set_transform(C.Transform(C.Location(loc.x, loc.y, self.actors[n].get_transform().location.z),
                                                     C.Rotation(yaw=self.site.road_yaw)))

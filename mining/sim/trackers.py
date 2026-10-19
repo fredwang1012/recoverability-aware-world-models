@@ -53,8 +53,10 @@ class EgoController:
     def apply(self, cmd: EgoCommand, st: ActorState, t: float):
         """Make a command effective NOW (after planning + actuation delay)."""
         if cmd.long == "keep" and self.long != "keep":
+            # keep the learned feed-forward throttle across brake -> keep, rescaled to the new hold speed (drag grows ~ with speed);
+            # zeroing it would make a drag-limited plant decelerate after every resume
+            self.pi.i = float(np.clip(self.pi.i * st.v / self.v_hold, 0.0, 1.0)) if self.v_hold > 1e-6 else 0.0
             self.v_hold = st.v
-            self.pi.i = 0.0
         self.long, self.brake_frac = cmd.long, cmd.brake_frac
         if cmd.lat_target is not None and abs(cmd.lat_target - self.lat_target) > 1e-9:
             self.lat0, self.lat_target, self.t_lc, self.lc_time = st.lat, cmd.lat_target, t, cmd.lc_time

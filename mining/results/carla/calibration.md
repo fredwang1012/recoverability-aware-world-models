@@ -2,6 +2,7 @@
 
 knob: max_brake_torque at fixed tire_friction 5.0; default torque 700
 decel range 4.77..17.51 m/s^2; monotone in torque: True (strict: True); covers 5-9 m/s^2: True
+Note: torque factors 0.1 and 0.25 were added to reach 5-9 m/s^2 once gear 1 is engaged; the low end (~4.8-6 m/s^2) is engine-drag dominated, not a constant brake decel.
 mean resid RMS 0.275 m/s (max 0.375); max repeat difference 0.000 m/s^2; response delay 0.05 s
 
 ### Torque sweep (friction fixed)

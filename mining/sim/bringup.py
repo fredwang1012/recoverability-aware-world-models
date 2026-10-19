@@ -265,7 +265,9 @@ def cmd_calibrate(a):
              f"decel range {prof['decel_range'][0]:.2f}..{prof['decel_range'][1]:.2f} m/s^2; monotone in torque: {prof['monotone']} "
              f"(strict: {prof['strictly_monotone']}); covers 5-9 m/s^2: {prof['covers_5_to_9']}",
              f"mean resid RMS {prof['resid_rms_mean']:.3f} m/s (max {prof['resid_rms_max']:.3f}); max repeat difference "
-             f"{fmt(prof['repeat_diff_max'])} m/s^2; response delay {prof['response_delay_s']} s", "",
+             f"{fmt(prof['repeat_diff_max'])} m/s^2; response delay {prof['response_delay_s']} s",
+             "Note: torque factors 0.1 and 0.25 were added to reach 5-9 m/s^2 once gear 1 is engaged; the low end (~4.8-6 m/s^2) is "
+             "engine-drag dominated, not a constant brake decel.", "",
              "### Torque sweep (friction fixed)", "",
              "| torque factor | max_brake_torque | decel (m/s^2) | repeat diff | resid RMS (m/s) | onset delay (s) | max abs yaw (rad) |",
              "|---|---|---|---|---|---|---|"]
@@ -329,12 +331,14 @@ def cmd_selftest(a):
     r = _ep(mk, _clear_spec(12.0, 9.0), P.Bypass(side=-1, lc_time=3.0))
     lat = r.ego[-1][2]
     check("left lane change ends at -lane_w +/- 0.3 m", abs(lat + site.lane_w) < 0.3, f"lat_end={lat:.2f} m (target {-site.lane_w:.2f})")
-    th = {"gap_m": 18.0, "v_mps": 12.0, "tau_s": 0.25}
-    r = _ep(mk, CO.spec(th), P.BrakeHold(), CO.WORLD)
-    g = r.geometry["initial_min_clearance_m"]
-    check("measured bumper gap at t0 equals the declared gap (0.1 m)", all(abs(c - 18.0) < 0.1 for c in g.values()),
-          f"measured clearances {{{', '.join(f'{k}: {c:.3f}' for k, c in g.items())}}} m (declared 18.0)")
-    check("no spawn overlap / no invalid reasons", not r.invalid, f"invalid={r.invalid}")
+    for gap_d, v_d in ((18.0, 12.0), (30.0, 20.0)):
+        th = {"gap_m": gap_d, "v_mps": v_d, "tau_s": 0.25}
+        r = _ep(mk, CO.spec(th), P.BrakeHold(), CO.WORLD)
+        g = r.geometry["initial_min_clearance_m"]
+        check(f"measured bumper gap at t0 equals the declared gap (0.1 m) at v={v_d:g}, gap={gap_d:g}",
+              all(abs(c - gap_d) < 0.1 for c in g.values()),
+              f"measured clearances {{{', '.join(f'{k}: {c:.3f}' for k, c in g.items())}}} m (declared {gap_d:g})")
+        check(f"no spawn overlap / no invalid reasons (v={v_d:g})", not r.invalid, f"invalid={r.invalid}")
     lines.append("\nRESULT: " + ("PASS" if ok_all else "FAIL - diagnose before running any search (settle ticks, spawn z, substepping, controller state)"))
     _write(f"{OUT}/selftest.txt", "\n".join(lines) + "\n")
     print("\n".join(lines))
