@@ -29,7 +29,7 @@ Brake-fraction -> measured decel (clear road, window 0.9 v0 .. 0.4 v0): v0 14: f
 ### RC13 (4 RC10-construction scenes, all R_REF with this task's own runs)
 Witness `shared_slowdown_then_branch`: G in world A / world B = 0.105/0.049, 0.121/0.050, 0.105/0.018, 0.105/0.105. Predictor first-sighting observations recorded from CARLA.
 - Exact CV envelope (E0, lat=lon=0, growth 0, horizon 4 s, dt 0.1, clearance 0): agrees with evidence on 4/4 cells in all 4 scenes (min box separation world B change_left 0.54-0.83 m).
-- Over-approximation: uniform inflation 1.0 m (E2) already rejects the witness branch in world B (`change_left`) in all 4 scenes although r >= eps in both worlds; smallest rejecting uniform inflation world B: 0.85, 0.55, 0.55, 0.85 m; world A (`stay`): 1.7 m in all. Growth 0.25 m/s on 0.5 m (E5) also rejects world B in all scenes. 0 false acceptances anywhere. Time resolution 0.5 s (E7) did not change decisions with zero inflation except for none (agrees 4/4).
+- Over-approximation: uniform inflation 1.0 m (E2) already rejects the witness branch in world B (`change_left`) in all 4 scenes although r >= eps in both worlds; smallest rejecting uniform inflation world B: 0.85, 0.55, 0.55, 0.85 m; world A (`stay`): 1.7 m in all. Growth 0.25 m/s on 0.5 m (E5) also rejects world B in all scenes. 0 false acceptances anywhere. Time resolution 0.5 s with zero inflation (E7) agrees 4/4 in all scenes; with 1.0 m inflation (E8) it still false-rejects in 3 of 4 scenes (the coarse grid misses the overlap in v 18, D 28).
 - Predictor parameters per row E0..E8 are listed in negatives.md.
 
 ## Files changed
