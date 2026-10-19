@@ -30,7 +30,7 @@ SPEEDS = (8.0, 11.0, 14.0, 18.0, 22.0)   # 8/11/14 are the brief's speeds; 18/22
 A_LAT_MAX = 8.0                        # m/s^2, controller ruling: declared in the RC03/RC07/RC20 CARLA specs (harness dyn-limit margin)
 LC_CANDIDATES = (1.0, 1.2, 1.4, 1.6, 2.0)   # lane-change durations searched; the largest one with a window under the limit is used
 RC19_TOL = 0.05                        # pre-declared |dV| tolerance (margins are normalised, unit-free), fixed before any run
-RC07_LIBRARY_ID = f"rc07_v2_alat{A_LAT_MAX:g}"
+RC07_LIBRARY_ID = f"rc07_v2_alat{A_LAT_MAX:g}_fixplant"      # re-run on the plant with moving actors pinned to their declared speed in warm-up (Task 6 fix round 1)
 TAG = f"al{A_LAT_MAX:g}"               # part of every limited sweep name / key, so a limit or library change cannot reuse stale records
 
 
@@ -262,14 +262,14 @@ def rc07_select(scan):
 
 def run_rc07(ctx):
     grid = [(g, rg, rv) for g in (26, 34) for rg in (40, 60, 80, 100) for rv in (18, 21, 24)]
-    scan = rc07_scan(ctx, f"rc07_scan_{TAG}", grid)
+    scan = rc07_scan(ctx, f"rc07_scan_{TAG}_fixplant", grid)
     sel, full = rc07_select(scan)
     res = {"scan": scan, "sel": None, "full": full, "fast_rear_full": sorted(k for k in full if k[2] >= 24)}
     if sel is None:
         return res
     th = rc07_theta(*sel)
     spy = []
-    r = ctx.point(f"rc07_sel_{TAG}", "_".join(map(str, sel)), lambda: rc07_rec(ctx, th, spy), library_id=RC07_LIBRARY_ID, a_lat_max=A_LAT_MAX)
+    r = ctx.point(f"rc07_sel_{TAG}_fixplant", "_".join(map(str, sel)), lambda: rc07_rec(ctx, th, spy), library_id=RC07_LIBRARY_ID, a_lat_max=A_LAT_MAX)
     if not spy:                              # cached: re-measure the rear speed with one episode of bypass_then_return
         from sim import policies as P
         TL.run("RC07", lambda: SpyPlant(ctx.factory(), spy), th, CFG, "carla", "carla_finite_replay",
@@ -424,6 +424,7 @@ def report(ctx, r03, r07, r12, r19, r20):
             for g in sorted(sc):
                 w(f"| {g:g} | {sc[g]['evidence_class']} | {mrow(sc[g])} |")
     w("\n## RC07: premature hand-back vs continuation\n")
+    w("*RC07 was re-run on the fixed plant (moving actors pinned to their declared speed during warm-up; Task 6 fix round 1). The first run, whose rear actor started at 15.90 m/s for a nominal 18, is superseded (sweeps `rc07_scan_al8` / `rc07_sel_al8`, kept in the jsonl directory; previous report text in `core_before_rc07_rerun.md`).*\n")
     w(f"Library `{RC07_LIBRARY_ID}` = bypass_then_stop, bypass_then_return, brake_hold, bypass_left (primary-only avoidance, no hand-back), lc_time 2.0 (peak a_lat ~5), "
       f"a_lat_max {A_LAT_MAX:g}.  v = 12, rear actor in the left lane.  Full contrast in one scene = bypass_left >= eps AND bypass_then_stop < eps AND bypass_then_return >= eps (`rc07_contrast`).\n")
     w("| gap | rear_gap | rear_v | evidence | full contrast | margins |\n|---|---|---|---|---|---|")

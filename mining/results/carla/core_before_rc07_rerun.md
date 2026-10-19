@@ -1,0 +1,557 @@
+# CARLA core cases (Task C2: RC03, RC07, RC12, RC19, RC20)
+
+Physics profile `pp_381b4c6e55`, decel target 6.19, eps = 0.0, reserve c = 1.0 m (margin.DEFAULT_V2, unchanged), act delay 0.25 s. Records: `results/carla/core/*.jsonl`. Labels are `contract.classify` output only.
+
+**Actuation limit.** RC03, RC07 and RC20 CARLA specs declare `a_lat_max = 8` m/s^2 (recorded in every record's `geometry.spec`): the harness adds a dynamic-limit margin (limit - peak |v * yaw_rate|)/limit, so a manoeuvre exceeding the limit is below eps and cannot be a witness.  Reason: the CARLA tyre friction of the profile is non-physical, so an unlimited lane change could exploit unrealistic grip (measured on CARLA at v = 14: bypass peak |a_lat| 14.7 m/s^2 at lc_time 1.0, 8.5 at 1.6, 6.0 at 2.0; per-tick |v*yaw_rate| is smooth, a 3-tick moving average changes the peak by < 2%, so no smoothing is applied).  Peak |a_lat| values below are measured from CARLA traces (peak = limit * (1 - dyn margin)).  The earlier un-limited runs (lc_time 1.0) are kept as `*_nolimit_superseded.jsonl` and are not used.
+
+**Server sessions.** RC12 and RC19 records were produced in the earlier server session (before the restart); every limited RC03/RC07/RC20 record and the a_lat check were produced in the restarted session.  Selftest values shifted slightly after the restart (keep-test v0 11.97 -> 11.87 m/s); RC12 and RC19 were not re-run and are mixed in by key (same physics_profile_id).
+
+## RC03: braking fails, bypass passes (brief speeds 8, 11, 14, plus 18 and 22 added after no window was found at 8-14)
+
+Search: for each speed, gap scan for lc_time in 1, 1.2, 1.4, 1.6, 2.  Rule: use the largest lc_time with a window (brake_hold < eps and some bypass >= eps under the limit); chosen gap = median of that window.  Library per run: brake_hold, lane_follow, bypass_left(lc), brake_steer_left(lc, 0.4 s brake).
+
+Windows found per lc_time:
+
+| v | lc 2 | lc 1.6 | lc 1.4 | lc 1.2 | lc 1 |
+|---|---|---|---|---|---|
+| 8 | none | none | none | none | none |
+| 11 | none | none | none | none | none |
+| 14 | none | none | none | none | none |
+| 18 | [30.0] | none | none | none | none |
+| 22 | [38.0, 40.0, 42.0] | none | none | none | none |
+
+Chosen witnesses:
+
+| v | lc_time | gap | brake_hold G | best bypass (policy) G | peak abs a_lat of witness (m/s^2) | evidence | closed-lane evidence | closed margins |
+|---|---|---|---|---|---|---|---|---|
+| 8 | - | NONE | - | - | - | - | - | - |
+| 11 | - | NONE | - | - | - | - | - | - |
+| 14 | - | NONE | - | - | - | - | - | - |
+| 18 | 2 | 30 | -inf | bypass_left 0.008 | 6.66 | R_REF | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 22 | 2 | 40 | -inf | bypass_left 0.068 | 7.13 | R_REF | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+
+Speeds with NO window under the limit (mechanism not shown on CARLA, template excluded for these, nothing relabelled): [8.0, 11.0, 14.0].  Under the a_lat limit every admissible lane change (lc_time 1.0-1.6 all exceed the limit or fail clearance in the scans; only 2.0 is admissible) needs more gap than braking, so the bypass becomes a witness only where brake_hold already passes; a window appears only at higher speeds (18 and 22 m/s, outside the brief's set).  The v = 18 window is a single gap (30 m, bypass margin 0.008), so it is fragile; v = 22 has 3 gaps.
+
+Closing the escape lane (blocker in the left lane at the same x) gives a finite-library negative: labelled by evidence only (U_LIBRARY expected, never U_MODEL, never pre-labelled).
+
+
+Scan v = 8, lc_time = 2:
+
+| gap | evidence | margins |
+|---|---|---|
+| 7 | U_LIBRARY | brake_hold=-0.080, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 7.5 | R_REF | brake_hold=0.020, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 8 | R_REF | brake_hold=0.120, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 8.5 | R_REF | brake_hold=0.220, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 9 | R_REF | brake_hold=0.320, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 9.5 | R_REF | brake_hold=0.420, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 10 | R_REF | brake_hold=0.520, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 10.5 | R_REF | brake_hold=0.620, lane_follow=-inf, bypass_left=-0.166, brake_steer_left=-inf |
+| 11 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.118, brake_steer_left=-inf |
+
+Scan v = 8, lc_time = 1.6:
+
+| gap | evidence | margins |
+|---|---|---|
+| 7 | U_LIBRARY | brake_hold=-0.080, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 7.5 | R_REF | brake_hold=0.020, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 8 | R_REF | brake_hold=0.120, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 8.5 | R_REF | brake_hold=0.220, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 9 | R_REF | brake_hold=0.320, lane_follow=-inf, bypass_left=-0.163, brake_steer_left=-inf |
+| 9.5 | R_REF | brake_hold=0.420, lane_follow=-inf, bypass_left=-0.110, brake_steer_left=-inf |
+| 10 | R_REF | brake_hold=0.520, lane_follow=-inf, bypass_left=-0.054, brake_steer_left=-inf |
+| 10.5 | R_REF | brake_hold=0.620, lane_follow=-inf, bypass_left=0.001, brake_steer_left=-0.165 |
+| 11 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=0.019, brake_steer_left=-0.102 |
+
+Scan v = 8, lc_time = 1.4:
+
+| gap | evidence | margins |
+|---|---|---|
+| 7 | U_LIBRARY | brake_hold=-0.080, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 7.5 | R_REF | brake_hold=0.020, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 8 | R_REF | brake_hold=0.120, lane_follow=-inf, bypass_left=-0.197, brake_steer_left=-inf |
+| 8.5 | R_REF | brake_hold=0.220, lane_follow=-inf, bypass_left=-0.136, brake_steer_left=-inf |
+| 9 | R_REF | brake_hold=0.320, lane_follow=-inf, bypass_left=-0.077, brake_steer_left=-inf |
+| 9.5 | R_REF | brake_hold=0.420, lane_follow=-inf, bypass_left=-0.017, brake_steer_left=-inf |
+| 10 | R_REF | brake_hold=0.520, lane_follow=-inf, bypass_left=0.031, brake_steer_left=-0.151 |
+| 10.5 | R_REF | brake_hold=0.620, lane_follow=-inf, bypass_left=0.031, brake_steer_left=-0.083 |
+| 11 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=0.031, brake_steer_left=-0.014 |
+
+Scan v = 8, lc_time = 1.2:
+
+| gap | evidence | margins |
+|---|---|---|
+| 7 | U_LIBRARY | brake_hold=-0.080, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 7.5 | R_REF | brake_hold=0.020, lane_follow=-inf, bypass_left=-0.174, brake_steer_left=-inf |
+| 8 | R_REF | brake_hold=0.120, lane_follow=-inf, bypass_left=-0.105, brake_steer_left=-inf |
+| 8.5 | R_REF | brake_hold=0.220, lane_follow=-inf, bypass_left=-0.040, brake_steer_left=-inf |
+| 9 | R_REF | brake_hold=0.320, lane_follow=-inf, bypass_left=0.022, brake_steer_left=-0.209 |
+| 9.5 | R_REF | brake_hold=0.420, lane_follow=-inf, bypass_left=0.041, brake_steer_left=-0.136 |
+| 10 | R_REF | brake_hold=0.520, lane_follow=-inf, bypass_left=0.041, brake_steer_left=-0.064 |
+| 10.5 | R_REF | brake_hold=0.619, lane_follow=-inf, bypass_left=0.041, brake_steer_left=0.010 |
+| 11 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=0.041, brake_steer_left=0.045 |
+
+Scan v = 8, lc_time = 1:
+
+| gap | evidence | margins |
+|---|---|---|
+| 7 | U_LIBRARY | brake_hold=-0.080, lane_follow=-inf, bypass_left=-0.145, brake_steer_left=-inf |
+| 7.5 | R_REF | brake_hold=0.020, lane_follow=-inf, bypass_left=-0.133, brake_steer_left=-inf |
+| 8 | R_REF | brake_hold=0.120, lane_follow=-inf, bypass_left=-0.133, brake_steer_left=-inf |
+| 8.5 | R_REF | brake_hold=0.220, lane_follow=-inf, bypass_left=-0.133, brake_steer_left=-inf |
+| 9 | R_REF | brake_hold=0.320, lane_follow=-inf, bypass_left=-0.133, brake_steer_left=-0.122 |
+| 9.5 | R_REF | brake_hold=0.420, lane_follow=-inf, bypass_left=-0.133, brake_steer_left=-0.044 |
+| 10 | R_REF | brake_hold=0.520, lane_follow=-inf, bypass_left=-0.133, brake_steer_left=0.020 |
+| 10.5 | R_REF | brake_hold=0.620, lane_follow=-inf, bypass_left=-0.133, brake_steer_left=0.040 |
+| 11 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.133, brake_steer_left=0.040 |
+
+Scan v = 11, lc_time = 2:
+
+| gap | evidence | margins |
+|---|---|---|
+| 10 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 11 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 12 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 13 | U_LIBRARY | brake_hold=-0.133, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 14 | R_REF | brake_hold=0.067, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 15 | R_REF | brake_hold=0.267, lane_follow=-inf, bypass_left=-0.148, brake_steer_left=-inf |
+| 16 | R_REF | brake_hold=0.467, lane_follow=-inf, bypass_left=-0.079, brake_steer_left=-inf |
+| 17 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.019, brake_steer_left=-0.161 |
+| 18 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=0.036, brake_steer_left=-0.072 |
+| 19 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=0.083, brake_steer_left=-0.001 |
+| 20 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=0.097, brake_steer_left=0.057 |
+
+Scan v = 11, lc_time = 1.6:
+
+| gap | evidence | margins |
+|---|---|---|
+| 10 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 11 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 12 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 13 | U_LIBRARY | brake_hold=-0.133, lane_follow=-inf, bypass_left=-0.134, brake_steer_left=-inf |
+| 14 | R_REF | brake_hold=0.067, lane_follow=-inf, bypass_left=-0.049, brake_steer_left=-inf |
+| 15 | R_REF | brake_hold=0.267, lane_follow=-inf, bypass_left=0.017, brake_steer_left=-0.167 |
+| 16 | R_REF | brake_hold=0.467, lane_follow=-inf, bypass_left=0.045, brake_steer_left=-0.074 |
+| 17 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.056, brake_steer_left=0.013 |
+| 18 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=0.056, brake_steer_left=0.034 |
+| 19 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=0.056, brake_steer_left=0.034 |
+| 20 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=0.056, brake_steer_left=0.034 |
+
+Scan v = 11, lc_time = 1.4:
+
+| gap | evidence | margins |
+|---|---|---|
+| 10 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 11 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 12 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.127, brake_steer_left=-inf |
+| 13 | U_LIBRARY | brake_hold=-0.133, lane_follow=-inf, bypass_left=-0.033, brake_steer_left=-inf |
+| 14 | R_REF | brake_hold=0.067, lane_follow=-inf, bypass_left=-0.017, brake_steer_left=-0.181 |
+| 15 | R_REF | brake_hold=0.267, lane_follow=-inf, bypass_left=-0.017, brake_steer_left=-0.074 |
+| 16 | R_REF | brake_hold=0.467, lane_follow=-inf, bypass_left=-0.017, brake_steer_left=0.020 |
+| 17 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.017, brake_steer_left=0.030 |
+| 18 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.017, brake_steer_left=0.030 |
+| 19 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.017, brake_steer_left=0.030 |
+| 20 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.017, brake_steer_left=0.030 |
+
+Scan v = 11, lc_time = 1.2:
+
+| gap | evidence | margins |
+|---|---|---|
+| 10 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 11 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-inf |
+| 12 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-inf |
+| 13 | U_LIBRARY | brake_hold=-0.133, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-0.192 |
+| 14 | R_REF | brake_hold=0.067, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-0.116 |
+| 15 | R_REF | brake_hold=0.267, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-0.116 |
+| 16 | R_REF | brake_hold=0.467, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-0.116 |
+| 17 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-0.116 |
+| 18 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-0.116 |
+| 19 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-0.116 |
+| 20 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-0.116 |
+
+Scan v = 11, lc_time = 1:
+
+| gap | evidence | margins |
+|---|---|---|
+| 10 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.532, brake_steer_left=-inf |
+| 11 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.532, brake_steer_left=-inf |
+| 12 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.532, brake_steer_left=-inf |
+| 13 | U_LIBRARY | brake_hold=-0.133, lane_follow=-inf, bypass_left=-0.532, brake_steer_left=-0.350 |
+| 14 | R_REF | brake_hold=0.067, lane_follow=-inf, bypass_left=-0.532, brake_steer_left=-0.350 |
+| 15 | R_REF | brake_hold=0.267, lane_follow=-inf, bypass_left=-0.532, brake_steer_left=-0.350 |
+| 16 | R_REF | brake_hold=0.467, lane_follow=-inf, bypass_left=-0.532, brake_steer_left=-0.350 |
+| 17 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.532, brake_steer_left=-0.350 |
+| 18 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.532, brake_steer_left=-0.350 |
+| 19 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.532, brake_steer_left=-0.350 |
+| 20 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.532, brake_steer_left=-0.350 |
+
+Scan v = 14, lc_time = 2:
+
+| gap | evidence | margins |
+|---|---|---|
+| 14 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 15 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 16 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 17 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 18 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 19 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.174, brake_steer_left=-inf |
+| 20 | U_LIBRARY | brake_hold=-0.101, lane_follow=-inf, bypass_left=-0.121, brake_steer_left=-inf |
+| 21 | R_REF | brake_hold=0.099, lane_follow=-inf, bypass_left=-0.071, brake_steer_left=-inf |
+| 22 | R_REF | brake_hold=0.299, lane_follow=-inf, bypass_left=-0.023, brake_steer_left=-0.172 |
+| 23 | R_REF | brake_hold=0.499, lane_follow=-inf, bypass_left=0.022, brake_steer_left=-0.110 |
+| 24 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.063, brake_steer_left=-0.053 |
+| 25 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.099, brake_steer_left=0.000 |
+| 26 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.130, brake_steer_left=0.049 |
+
+Scan v = 14, lc_time = 1.6:
+
+| gap | evidence | margins |
+|---|---|---|
+| 14 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 15 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 16 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.192, brake_steer_left=-inf |
+| 17 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.126, brake_steer_left=-inf |
+| 18 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.065, brake_steer_left=-inf |
+| 19 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.058, brake_steer_left=-inf |
+| 20 | U_LIBRARY | brake_hold=-0.101, lane_follow=-inf, bypass_left=-0.058, brake_steer_left=-0.143 |
+| 21 | R_REF | brake_hold=0.099, lane_follow=-inf, bypass_left=-0.058, brake_steer_left=-0.069 |
+| 22 | R_REF | brake_hold=0.299, lane_follow=-inf, bypass_left=-0.058, brake_steer_left=-0.005 |
+| 23 | R_REF | brake_hold=0.499, lane_follow=-inf, bypass_left=-0.058, brake_steer_left=0.038 |
+| 24 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.058, brake_steer_left=0.038 |
+| 25 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.058, brake_steer_left=0.038 |
+| 26 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.058, brake_steer_left=0.038 |
+
+Scan v = 14, lc_time = 1.4:
+
+| gap | evidence | margins |
+|---|---|---|
+| 14 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 15 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.261, brake_steer_left=-inf |
+| 16 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.261, brake_steer_left=-inf |
+| 17 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.261, brake_steer_left=-inf |
+| 18 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.261, brake_steer_left=-inf |
+| 19 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.261, brake_steer_left=-0.126 |
+| 20 | U_LIBRARY | brake_hold=-0.101, lane_follow=-inf, bypass_left=-0.261, brake_steer_left=-0.121 |
+| 21 | R_REF | brake_hold=0.099, lane_follow=-inf, bypass_left=-0.261, brake_steer_left=-0.121 |
+| 22 | R_REF | brake_hold=0.299, lane_follow=-inf, bypass_left=-0.261, brake_steer_left=-0.121 |
+| 23 | R_REF | brake_hold=0.499, lane_follow=-inf, bypass_left=-0.261, brake_steer_left=-0.121 |
+| 24 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.261, brake_steer_left=-0.121 |
+| 25 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.261, brake_steer_left=-0.121 |
+| 26 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.261, brake_steer_left=-0.121 |
+
+Scan v = 14, lc_time = 1.2:
+
+| gap | evidence | margins |
+|---|---|---|
+| 14 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.496, brake_steer_left=-inf |
+| 15 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.496, brake_steer_left=-inf |
+| 16 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.496, brake_steer_left=-inf |
+| 17 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.496, brake_steer_left=-0.349 |
+| 18 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.496, brake_steer_left=-0.349 |
+| 19 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.496, brake_steer_left=-0.349 |
+| 20 | U_LIBRARY | brake_hold=-0.101, lane_follow=-inf, bypass_left=-0.496, brake_steer_left=-0.349 |
+| 21 | R_REF | brake_hold=0.099, lane_follow=-inf, bypass_left=-0.496, brake_steer_left=-0.349 |
+| 22 | R_REF | brake_hold=0.299, lane_follow=-inf, bypass_left=-0.496, brake_steer_left=-0.349 |
+| 23 | R_REF | brake_hold=0.499, lane_follow=-inf, bypass_left=-0.496, brake_steer_left=-0.349 |
+| 24 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.496, brake_steer_left=-0.349 |
+| 25 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.496, brake_steer_left=-0.349 |
+| 26 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.496, brake_steer_left=-0.349 |
+
+Scan v = 14, lc_time = 1:
+
+| gap | evidence | margins |
+|---|---|---|
+| 14 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-inf |
+| 15 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-inf |
+| 16 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
+| 17 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
+| 18 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
+| 19 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
+| 20 | U_LIBRARY | brake_hold=-0.101, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
+| 21 | R_REF | brake_hold=0.099, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
+| 22 | R_REF | brake_hold=0.299, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
+| 23 | R_REF | brake_hold=0.499, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
+| 24 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
+| 25 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
+| 26 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
+
+Scan v = 18, lc_time = 2:
+
+| gap | evidence | margins |
+|---|---|---|
+| 24 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 26 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.149, brake_steer_left=-inf |
+| 28 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.068, brake_steer_left=-inf |
+| 30 | R_REF | brake_hold=-inf, lane_follow=-inf, bypass_left=0.008, brake_steer_left=-0.163 |
+| 32 | R_REF | brake_hold=0.134, lane_follow=-inf, bypass_left=0.074, brake_steer_left=-0.073 |
+| 34 | R_REF | brake_hold=0.534, lane_follow=-inf, bypass_left=0.113, brake_steer_left=0.010 |
+| 36 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.119, brake_steer_left=0.082 |
+| 38 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.119, brake_steer_left=0.138 |
+| 40 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.119, brake_steer_left=0.146 |
+| 42 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.119, brake_steer_left=0.146 |
+| 44 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.119, brake_steer_left=0.146 |
+| 46 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.119, brake_steer_left=0.146 |
+| 48 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.119, brake_steer_left=0.146 |
+| 50 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.119, brake_steer_left=0.146 |
+
+Scan v = 18, lc_time = 1.6:
+
+| gap | evidence | margins |
+|---|---|---|
+| 24 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-inf |
+| 26 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-inf |
+| 28 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-0.167 |
+| 30 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-0.167 |
+| 32 | R_REF | brake_hold=0.134, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-0.167 |
+| 34 | R_REF | brake_hold=0.534, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-0.167 |
+| 36 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-0.167 |
+| 38 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-0.167 |
+| 40 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.250, brake_steer_left=-0.167 |
+| 42 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-0.167 |
+| 44 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-0.167 |
+| 46 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-0.167 |
+| 48 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-0.167 |
+| 50 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-0.167 |
+
+Scan v = 18, lc_time = 1.4:
+
+| gap | evidence | margins |
+|---|---|---|
+| 24 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-inf |
+| 26 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
+| 28 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
+| 30 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
+| 32 | R_REF | brake_hold=0.134, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
+| 34 | R_REF | brake_hold=0.534, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
+| 36 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
+| 38 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
+| 40 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
+| 42 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.433 |
+| 44 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
+| 46 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
+| 48 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
+| 50 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
+
+Scan v = 18, lc_time = 1.2:
+
+| gap | evidence | margins |
+|---|---|---|
+| 24 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
+| 26 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
+| 28 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
+| 30 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
+| 32 | R_REF | brake_hold=0.134, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
+| 34 | R_REF | brake_hold=0.534, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
+| 36 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
+| 38 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
+| 40 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
+| 42 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
+| 44 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
+| 46 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
+| 48 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
+| 50 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
+
+Scan v = 18, lc_time = 1:
+
+| gap | evidence | margins |
+|---|---|---|
+| 24 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-1.372, brake_steer_left=-1.082 |
+| 26 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-1.372, brake_steer_left=-1.082 |
+| 28 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-1.372, brake_steer_left=-1.082 |
+| 30 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-1.372, brake_steer_left=-1.082 |
+| 32 | R_REF | brake_hold=0.134, lane_follow=-inf, bypass_left=-1.372, brake_steer_left=-1.082 |
+| 34 | R_REF | brake_hold=0.534, lane_follow=-inf, bypass_left=-1.372, brake_steer_left=-1.082 |
+| 36 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.372, brake_steer_left=-1.082 |
+| 38 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.372, brake_steer_left=-1.082 |
+| 40 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.372, brake_steer_left=-1.082 |
+| 42 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.372, brake_steer_left=-1.082 |
+| 44 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.372, brake_steer_left=-1.082 |
+| 46 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.372, brake_steer_left=-1.082 |
+| 48 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.372, brake_steer_left=-1.082 |
+| 50 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.370, brake_steer_left=-1.082 |
+
+Scan v = 22, lc_time = 2:
+
+| gap | evidence | margins |
+|---|---|---|
+| 30 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 32 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.172, brake_steer_left=-inf |
+| 34 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.103, brake_steer_left=-inf |
+| 36 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.037, brake_steer_left=-inf |
+| 38 | R_REF | brake_hold=-inf, lane_follow=-inf, bypass_left=0.024, brake_steer_left=-0.173 |
+| 40 | R_REF | brake_hold=-inf, lane_follow=-inf, bypass_left=0.068, brake_steer_left=-0.100 |
+| 42 | R_REF | brake_hold=-0.174, lane_follow=-inf, bypass_left=0.068, brake_steer_left=-0.030 |
+| 44 | R_REF | brake_hold=0.226, lane_follow=-inf, bypass_left=0.068, brake_steer_left=0.008 |
+| 46 | R_REF | brake_hold=0.626, lane_follow=-inf, bypass_left=0.068, brake_steer_left=0.086 |
+| 48 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.068, brake_steer_left=0.086 |
+| 50 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.068, brake_steer_left=0.086 |
+| 52 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.068, brake_steer_left=0.086 |
+| 54 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.068, brake_steer_left=0.086 |
+| 56 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.068, brake_steer_left=0.086 |
+
+Scan v = 22, lc_time = 1.6:
+
+| gap | evidence | margins |
+|---|---|---|
+| 30 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.394, brake_steer_left=-inf |
+| 32 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.394, brake_steer_left=-inf |
+| 34 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.394, brake_steer_left=-0.322 |
+| 36 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.394, brake_steer_left=-0.322 |
+| 38 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.394, brake_steer_left=-0.322 |
+| 40 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.394, brake_steer_left=-0.322 |
+| 42 | U_LIBRARY | brake_hold=-0.174, lane_follow=-inf, bypass_left=-0.394, brake_steer_left=-0.322 |
+| 44 | R_REF | brake_hold=0.226, lane_follow=-inf, bypass_left=-0.394, brake_steer_left=-0.322 |
+| 46 | R_REF | brake_hold=0.626, lane_follow=-inf, bypass_left=-0.394, brake_steer_left=-0.322 |
+| 48 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.394, brake_steer_left=-0.322 |
+| 50 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.394, brake_steer_left=-0.322 |
+| 52 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.394, brake_steer_left=-0.322 |
+| 54 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.394, brake_steer_left=-0.322 |
+| 56 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.394, brake_steer_left=-0.322 |
+
+Scan v = 22, lc_time = 1.4:
+
+| gap | evidence | margins |
+|---|---|---|
+| 30 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-inf |
+| 32 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
+| 34 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
+| 36 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
+| 38 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
+| 40 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
+| 42 | U_LIBRARY | brake_hold=-0.174, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
+| 44 | R_REF | brake_hold=0.185, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
+| 46 | R_REF | brake_hold=0.626, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
+| 48 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
+| 50 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.645 |
+| 52 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
+| 54 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
+| 56 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
+
+Scan v = 22, lc_time = 1.2:
+
+| gap | evidence | margins |
+|---|---|---|
+| 30 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-1.306, brake_steer_left=-1.122 |
+| 32 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-1.306, brake_steer_left=-1.122 |
+| 34 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-1.306, brake_steer_left=-1.122 |
+| 36 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-1.306, brake_steer_left=-1.122 |
+| 38 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-1.306, brake_steer_left=-1.122 |
+| 40 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-1.306, brake_steer_left=-1.122 |
+| 42 | U_LIBRARY | brake_hold=-0.174, lane_follow=-inf, bypass_left=-1.306, brake_steer_left=-1.122 |
+| 44 | R_REF | brake_hold=0.226, lane_follow=-inf, bypass_left=-1.306, brake_steer_left=-1.122 |
+| 46 | R_REF | brake_hold=0.626, lane_follow=-inf, bypass_left=-1.306, brake_steer_left=-1.122 |
+| 48 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.306, brake_steer_left=-1.122 |
+| 50 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.306, brake_steer_left=-1.122 |
+| 52 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.306, brake_steer_left=-1.122 |
+| 54 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.306, brake_steer_left=-1.122 |
+| 56 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.306, brake_steer_left=-1.122 |
+
+Scan v = 22, lc_time = 1:
+
+| gap | evidence | margins |
+|---|---|---|
+| 30 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-1.943, brake_steer_left=-1.808 |
+| 32 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-1.943, brake_steer_left=-1.808 |
+| 34 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-1.943, brake_steer_left=-1.808 |
+| 36 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-1.943, brake_steer_left=-1.808 |
+| 38 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-1.943, brake_steer_left=-1.808 |
+| 40 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-1.943, brake_steer_left=-1.808 |
+| 42 | U_LIBRARY | brake_hold=-0.174, lane_follow=-inf, bypass_left=-1.943, brake_steer_left=-1.808 |
+| 44 | R_REF | brake_hold=0.226, lane_follow=-inf, bypass_left=-1.943, brake_steer_left=-1.808 |
+| 46 | R_REF | brake_hold=0.626, lane_follow=-inf, bypass_left=-1.943, brake_steer_left=-1.808 |
+| 48 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.943, brake_steer_left=-1.808 |
+| 50 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.943, brake_steer_left=-1.808 |
+| 52 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.943, brake_steer_left=-1.808 |
+| 54 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.943, brake_steer_left=-1.808 |
+| 56 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.943, brake_steer_left=-1.808 |
+
+## RC07: premature hand-back vs continuation
+
+Library `rc07_v2_alat8` = bypass_then_stop, bypass_then_return, brake_hold, bypass_left (primary-only avoidance, no hand-back), lc_time 2.0 (peak a_lat ~5), a_lat_max 8.  v = 12, rear actor in the left lane.  Full contrast in one scene = bypass_left >= eps AND bypass_then_stop < eps AND bypass_then_return >= eps (`rc07_contrast`).
+
+| gap | rear_gap | rear_v | evidence | full contrast | margins |
+|---|---|---|---|---|---|
+| 26 | 40 | 18 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=-inf |
+| 26 | 40 | 21 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=-0.155, brake_hold=0.105, bypass_left=-inf |
+| 26 | 40 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=-inf, brake_hold=0.105, bypass_left=-inf |
+| 26 | 60 | 18 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=-inf |
+| 26 | 60 | 21 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=-inf |
+| 26 | 60 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=-inf |
+| 26 | 80 | 18 | R_REF | True | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=0.127 |
+| 26 | 80 | 21 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=-inf |
+| 26 | 80 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=-inf |
+| 26 | 100 | 18 | R_REF | True | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=0.127 |
+| 26 | 100 | 21 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=-inf |
+| 26 | 100 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=-inf |
+| 34 | 40 | 18 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.107, brake_hold=0.105, bypass_left=-inf |
+| 34 | 40 | 21 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=-inf, brake_hold=0.105, bypass_left=-inf |
+| 34 | 40 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=-inf, brake_hold=0.105, bypass_left=-inf |
+| 34 | 60 | 18 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.105, brake_hold=0.105, bypass_left=-inf |
+| 34 | 60 | 21 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.109, brake_hold=0.105, bypass_left=-inf |
+| 34 | 60 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=-0.109, brake_hold=0.105, bypass_left=-inf |
+| 34 | 80 | 18 | R_REF | True | bypass_then_stop=-inf, bypass_then_return=0.119, brake_hold=0.105, bypass_left=0.127 |
+| 34 | 80 | 21 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.105, brake_hold=0.105, bypass_left=-inf |
+| 34 | 80 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.109, brake_hold=0.105, bypass_left=-inf |
+| 34 | 100 | 18 | R_REF | True | bypass_then_stop=-inf, bypass_then_return=0.119, brake_hold=0.105, bypass_left=0.127 |
+| 34 | 100 | 21 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.105, brake_hold=0.105, bypass_left=-inf |
+| 34 | 100 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.105, brake_hold=0.105, bypass_left=-inf |
+
+Scenes with the full contrast: [(26, 80, 18), (26, 100, 18), (34, 80, 18), (34, 100, 18)].  Fast-rear (rear_v = 24) scenes with the full contrast: NONE (at rear_v 24 the primary-only bypass_left keeps driving in the left lane and is always hit by the rear actor, so all three never hold together there).
+
+Selection rule: among full-contrast scenes take the highest rear_v, then the median of those ordered by (gap, rear_gap).  Selected: gap 34, rear_gap 80, rear_v 18.  Evidence **R_REF**; margins: bypass_then_stop=-inf, bypass_then_return=0.119, brake_hold=0.105, bypass_left=0.127.
+
+- bypass_left: termination horizon, contacted none, peak abs a_lat 5.55 m/s^2
+- bypass_then_stop: termination collision, contacted ['rear'], peak abs a_lat 5.55 m/s^2
+- bypass_then_return: termination horizon, contacted none, peak abs a_lat 5.63 m/s^2
+- brake_hold: termination horizon, contacted none, peak abs a_lat 0.00 m/s^2
+
+Measured rear speed (per-tick spy over the policy episodes, 245 ticks): nominal 18, at start 15.90, max 18.85, mean 18.05 m/s.  brake_hold also passes in place at gap 34, so the scene stays R_REF (one refuted policy never makes a scene unrecoverable).
+
+## RC12: baseline-keep prefix before braking (corridor, gap 40, v 12, tau 0.25, brake_hold@prefix)
+
+| prefix_s | brake_hold G | evidence |
+|---|---|---|
+| 0.00 | 0.668 | R_REF |
+| 0.25 | 0.668 | R_REF |
+| 0.50 | 0.668 | R_REF |
+| 0.75 | 0.668 | R_REF |
+| 1.00 | 0.668 | R_REF |
+| 1.25 | 0.668 | R_REF |
+| 1.50 | 0.668 | R_REF |
+| 1.75 | 0.620 | R_REF |
+| 2.00 | 0.032 | R_REF |
+| 2.05 | -0.098 | U_LIBRARY |
+| 2.10 | -inf | U_LIBRARY |
+| 2.15 | -inf | U_LIBRARY |
+| 2.20 | -inf | U_LIBRARY |
+| 2.25 | -inf | U_LIBRARY |
+| 2.50 | -inf | U_LIBRARY |
+| 2.75 | -inf | U_LIBRARY |
+| 3.00 | -inf | U_LIBRARY |
+
+Feasible-prefix set (R_REF): [0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]; upper end 2.0; down-set (feasible iff prefix <= upper): True.
+Analytic T_p* = (gap - D_stop - c)/v, D_stop = v^2/(2 b_cal) + v tau_eff, b_cal = 6.211, tau_eff = 0.3: **1.984 s**.  The prefix is quantised to the 0.05 s tick (step function), so agreement means within one tick.  b_cal/tau_eff come from the same brake_hold calibration trace (Task 3): this checks structure, not an independent prediction; the ego also runs at ~11.89 m/s, not 12.
+
+CARLA upper end - T_p* = +0.016 s.
+
+## RC19: benign anchor vs nuisance twin
+
+Tolerance pre-declared before any run: |dV| <= 0.05 (normalised margins, unit-free).
+
+| v | anchor G | nuisance G | |dV| (max abs profile diff) | within tolerance | evidence anchor / twin |
+|---|---|---|---|---|---|
+| 8 | ['0.668'] | ['0.668'] | 0.0000 | True | R_REF / R_REF |
+| 12 | ['0.668'] | ['0.668'] | 0.0000 | True | R_REF / R_REF |
+
+## RC20: library completeness (same RC03 scene, physics unchanged)
+
+Same scene as the RC03 witness at each speed (lc_time as chosen above, a_lat_max 8).  Restricted = brake_hold, lane_follow; budget-limited = restricted with run_mask {(0,0)} (library id +budget1); expanded = full RC03 library.  Library versions: ids below, `sim.policies.VERSION` in each descriptor.
+
+| v | lc | gap | restricted | budget-limited (R_raw) | expanded | identical physical spec |
+|---|---|---|---|---|---|---|
+| 18 | 2 | 30 | U_LIBRARY (rc03_carla_lc2_restricted_alat8) | UNRESOLVED, [['-inf'], [None]] | R_REF (rc03_carla_lc2_full_alat8) | True |
+| 22 | 2 | 40 | U_LIBRARY (rc03_carla_lc2_restricted_alat8) | UNRESOLVED, [['-inf'], [None]] | R_REF (rc03_carla_lc2_full_alat8) | True |
+
+## Record validation
+
+359 records in `results/carla/core/` (excluding superseded/probe files) checked with validate_records.check_record: 0 failures.

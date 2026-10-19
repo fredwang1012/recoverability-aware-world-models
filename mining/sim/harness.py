@@ -42,12 +42,15 @@ A_LONG_SMOOTH_TICKS = 5          # 0.25 s centred moving average of the measured
 def accel_series(speeds, ax_hist, a_lat, vmin, dt=DT):
     """Longitudinal / combined acceleration series aligned to the state index.  a_long is smoothed FIRST (centred moving average of the
     measured per-tick acceleration), THEN the ticks with ego speed < vmin are excluded (set to 0) from a_long and a_comb, so the mask edge
-    never zeroes part of a smoothing window.  The unmasked series is returned too.  peaks: time and speed of each series' maximum."""
+    is excluded together with its whole smoothing window (ticks within half a window of a speed < vmin, and the first and last half-window of the episode).  The unmasked series is returned too.  peaks: time and speed of each series' maximum."""
     speeds, a_lat = np.asarray(speeds, float), np.asarray(a_lat, float)
     ax_raw = np.array([0.0] + list(ax_hist))
     n = len(a_lat)
     ax_sm = smooth(ax_raw)[:n]
-    fast = speeds[:n] >= vmin
+    # a tick counts only if its WHOLE smoothing window lies at or above vmin (no end-of-stop transient leaks in either direction)
+    h = A_LONG_SMOOTH_TICKS // 2
+    ok_v = speeds[:n] >= vmin
+    fast = np.array([bool(ok_v[max(0, i - h):i + h + 1].all()) and i - h >= 0 and i + h < n for i in range(n)])
     a_long = np.where(fast, ax_sm, 0.0)
     a_comb_u = np.sqrt(ax_sm ** 2 + a_lat ** 2)
     a_comb = np.where(fast, a_comb_u, 0.0)

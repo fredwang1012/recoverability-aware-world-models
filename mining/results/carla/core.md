@@ -467,45 +467,47 @@ Scan v = 22, lc_time = 1:
 
 ## RC07: premature hand-back vs continuation
 
-Library `rc07_v2_alat8` = bypass_then_stop, bypass_then_return, brake_hold, bypass_left (primary-only avoidance, no hand-back), lc_time 2.0 (peak a_lat ~5), a_lat_max 8.  v = 12, rear actor in the left lane.  Full contrast in one scene = bypass_left >= eps AND bypass_then_stop < eps AND bypass_then_return >= eps (`rc07_contrast`).
+*RC07 was re-run on the fixed plant (moving actors pinned to their declared speed during warm-up; Task 6 fix round 1). The first run, whose rear actor started at 15.90 m/s for a nominal 18, is superseded (sweeps `rc07_scan_al8` / `rc07_sel_al8`, kept in the jsonl directory; previous report text in `core_before_rc07_rerun.md`).*
+
+Library `rc07_v2_alat8_fixplant` = bypass_then_stop, bypass_then_return, brake_hold, bypass_left (primary-only avoidance, no hand-back), lc_time 2.0 (peak a_lat ~5), a_lat_max 8.  v = 12, rear actor in the left lane.  Full contrast in one scene = bypass_left >= eps AND bypass_then_stop < eps AND bypass_then_return >= eps (`rc07_contrast`).
 
 | gap | rear_gap | rear_v | evidence | full contrast | margins |
 |---|---|---|---|---|---|
 | 26 | 40 | 18 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=-inf |
-| 26 | 40 | 21 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=-0.155, brake_hold=0.105, bypass_left=-inf |
+| 26 | 40 | 21 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=-inf, brake_hold=0.105, bypass_left=-inf |
 | 26 | 40 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=-inf, brake_hold=0.105, bypass_left=-inf |
 | 26 | 60 | 18 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=-inf |
 | 26 | 60 | 21 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=-inf |
-| 26 | 60 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=-inf |
-| 26 | 80 | 18 | R_REF | True | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=0.127 |
+| 26 | 60 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=-inf, brake_hold=0.105, bypass_left=-inf |
+| 26 | 80 | 18 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=-inf |
 | 26 | 80 | 21 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=-inf |
 | 26 | 80 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=-inf |
 | 26 | 100 | 18 | R_REF | True | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=0.127 |
 | 26 | 100 | 21 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=-inf |
-| 26 | 100 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.099, brake_hold=0.105, bypass_left=-inf |
-| 34 | 40 | 18 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.107, brake_hold=0.105, bypass_left=-inf |
+| 26 | 100 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.071, brake_hold=0.105, bypass_left=-inf |
+| 34 | 40 | 18 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=-0.156, brake_hold=0.105, bypass_left=-inf |
 | 34 | 40 | 21 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=-inf, brake_hold=0.105, bypass_left=-inf |
 | 34 | 40 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=-inf, brake_hold=0.105, bypass_left=-inf |
 | 34 | 60 | 18 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.105, brake_hold=0.105, bypass_left=-inf |
-| 34 | 60 | 21 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.109, brake_hold=0.105, bypass_left=-inf |
-| 34 | 60 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=-0.109, brake_hold=0.105, bypass_left=-inf |
-| 34 | 80 | 18 | R_REF | True | bypass_then_stop=-inf, bypass_then_return=0.119, brake_hold=0.105, bypass_left=0.127 |
+| 34 | 60 | 21 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.058, brake_hold=0.105, bypass_left=-inf |
+| 34 | 60 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=-inf, brake_hold=0.105, bypass_left=-inf |
+| 34 | 80 | 18 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.105, brake_hold=0.105, bypass_left=-inf |
 | 34 | 80 | 21 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.105, brake_hold=0.105, bypass_left=-inf |
-| 34 | 80 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.109, brake_hold=0.105, bypass_left=-inf |
+| 34 | 80 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.119, brake_hold=0.105, bypass_left=-inf |
 | 34 | 100 | 18 | R_REF | True | bypass_then_stop=-inf, bypass_then_return=0.119, brake_hold=0.105, bypass_left=0.127 |
 | 34 | 100 | 21 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.105, brake_hold=0.105, bypass_left=-inf |
-| 34 | 100 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.105, brake_hold=0.105, bypass_left=-inf |
+| 34 | 100 | 24 | R_REF | False | bypass_then_stop=-inf, bypass_then_return=0.106, brake_hold=0.105, bypass_left=-inf |
 
-Scenes with the full contrast: [(26, 80, 18), (26, 100, 18), (34, 80, 18), (34, 100, 18)].  Fast-rear (rear_v = 24) scenes with the full contrast: NONE (at rear_v 24 the primary-only bypass_left keeps driving in the left lane and is always hit by the rear actor, so all three never hold together there).
+Scenes with the full contrast: [(26, 100, 18), (34, 100, 18)].  Fast-rear (rear_v = 24) scenes with the full contrast: NONE (at rear_v 24 the primary-only bypass_left keeps driving in the left lane and is always hit by the rear actor, so all three never hold together there).
 
-Selection rule: among full-contrast scenes take the highest rear_v, then the median of those ordered by (gap, rear_gap).  Selected: gap 34, rear_gap 80, rear_v 18.  Evidence **R_REF**; margins: bypass_then_stop=-inf, bypass_then_return=0.119, brake_hold=0.105, bypass_left=0.127.
+Selection rule: among full-contrast scenes take the highest rear_v, then the median of those ordered by (gap, rear_gap).  Selected: gap 34, rear_gap 100, rear_v 18.  Evidence **R_REF**; margins: bypass_then_stop=-inf, bypass_then_return=0.119, brake_hold=0.105, bypass_left=0.127.
 
 - bypass_left: termination horizon, contacted none, peak abs a_lat 5.55 m/s^2
 - bypass_then_stop: termination collision, contacted ['rear'], peak abs a_lat 5.55 m/s^2
 - bypass_then_return: termination horizon, contacted none, peak abs a_lat 5.63 m/s^2
 - brake_hold: termination horizon, contacted none, peak abs a_lat 0.00 m/s^2
 
-Measured rear speed (per-tick spy over the policy episodes, 245 ticks): nominal 18, at start 15.90, max 18.85, mean 18.05 m/s.  brake_hold also passes in place at gap 34, so the scene stays R_REF (one refuted policy never makes a scene unrecoverable).
+Measured rear speed (per-tick spy over the policy episodes, 905 ticks): nominal 18, at start 17.14, max 18.81, mean 17.90 m/s.  brake_hold also passes in place at gap 34, so the scene stays R_REF (one refuted policy never makes a scene unrecoverable).
 
 ## RC12: baseline-keep prefix before braking (corridor, gap 40, v 12, tau 0.25, brake_hold@prefix)
 
@@ -554,4 +556,4 @@ Same scene as the RC03 witness at each speed (lc_time as chosen above, a_lat_max
 
 ## Record validation
 
-359 records in `results/carla/core/` (excluding superseded/probe files) checked with validate_records.check_record: 0 failures.
+384 records in `results/carla/core/` (excluding superseded/probe files) checked with validate_records.check_record: 0 failures.

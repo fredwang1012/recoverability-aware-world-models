@@ -141,20 +141,19 @@ def test_script_helpers_median_and_contrast_on_synthetic_rows():
     assert CCP.rc05_contrast(r2)
 
 
-def test_accel_series_mask_applies_after_smoothing_and_vmin_overrides_default():
+def test_accel_series_mask_excludes_whole_smoothing_window_and_vmin_overrides_default():
     n = 40
-    speeds = np.linspace(10.0, 0.0, n)                         # crosses 5 m/s at index ~20
+    speeds = np.linspace(10.0, 0.0, n)                         # crosses 5 m/s between index 19 and 20
     ax = np.full(n - 1, -6.0)
     ax[24:28] = -30.0                                          # wheel-lock spike below 5 m/s
     a_lat = np.zeros(n)
     acc = H.accel_series(speeds, ax, a_lat, 5.0)
-    fast = speeds >= 5.0
-    assert np.all(acc["a_comb"][~fast] == 0.0) and np.all(acc["a_long_masked"][~fast] == 0.0)   # ticks below vmin excluded
+    h = H.A_LONG_SMOOTH_TICKS // 2
+    first_slow = int(np.argmax(speeds < 5.0))
+    assert np.all(acc["a_comb"][first_slow - h:] == 0.0) and np.all(acc["a_long_masked"][first_slow - h:] == 0.0)   # within half a window of the crossing: excluded
+    assert acc["a_comb"][first_slow - h - 1] > 0.0                                          # the last full-window tick is still counted
     assert acc["a_comb_unmasked"].max() > 20.0                                              # unmasked still sees the spike
-    assert acc["a_comb"].max() <= 6.0 + 1e-9                                                # masked: only the 6 m/s^2 plateau
-    # mask is applied to the SMOOTHED series: the first fast ticks keep their full smoothing window (no zero-padding artefact)
-    k = int(np.argmax(fast[::-1]) and (n - 1 - np.argmax(fast[::-1])))
-    assert abs(acc["a_comb"][k] - 6.0) < 1e-9
+    assert acc["a_comb"].max() <= 6.0 + 1e-9                                                # no leak of the spike into the counted ticks
     low = H.accel_series(speeds, ax, a_lat, 0.5)               # a spec vmin overrides the default
     assert low["a_comb"].max() > 20.0 and low["peaks"]["a_comb"]["v"] < 5.0
 
@@ -166,3 +165,14 @@ def test_harness_uses_spec_a_comb_vmin_and_records_peak_times():
     res = H.run_episode(KinematicPlant(b_max=6.2), sp, P.BrakeHold(), CP.CLEAN, CFG)
     pt = res.margin["dyn_peaks"]["peak_times"]
     assert pt["a_long"]["v"] >= H.A_COMB_VMIN and "a_comb_unmasked" in res.margin["dyn_peaks"]
+
+
+def test_harness_spec_a_comb_vmin_override_changes_the_margin():
+    th = {"gap_m": 38.0, "v_mps": 18.0, "tau_s": 0.25}
+    out = {}
+    for vmin in (0.0, 50.0):
+        sp = dict(CP.rc18_spec(th, CFG, comb=True), a_comb_vmin=vmin)
+        res = H.run_episode(KinematicPlant(b_max=9.0), sp, P.BrakeHold(), CP.CLEAN, CFG)
+        out[vmin] = res.margin["parts"]["dyn"]
+    assert out[0.0] < 0.0 <= out[50.0] or out[0.0] < out[50.0]       # vmin=0 counts the 9 m/s^2 braking (> 8); vmin=50 excludes every tick
+    assert out[50.0] > out[0.0]

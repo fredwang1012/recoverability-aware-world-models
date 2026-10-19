@@ -99,3 +99,24 @@ Tests: `pytest -q tests` -> 98 passed (96 + 2 new: mask-after-smoothing syntheti
    - Ego half-length now comes from `Obs.ego_hl`, filled by the observation feed (the old Task 4 `_obstacle_passed` is unchanged).
    - `__import__` replaced by a normal import.
    - `snap.ax` exists in both plants (the kinematic returns the ego acceleration; CARLA returns the tick difference of ego speed; first CARLA step is None, treated as 0).
+
+---
+# Fix report, round 2
+
+Tests: `PYTHONNOUSERSITE=1 .../python.exe -m pytest -q tests` -> 99 passed (tests/test_sim_compositional.py: 14 passed alone). CARLA: RC18 sweeps re-run under tag `...fw` (230 records in `compositional/`, 0 validation failures), core RC07 re-run (core/ now 384 records, 0 failures). GPU 59-61 C, no server problems.
+
+1. **Mask (controller ruling).** `harness.accel_series`: a tick counts for a_long (smoothed) and a_comb only if its whole 5-tick smoothing window has ego speed >= a_comb_vmin; the first and last half-window of the episode are excluded too. Synthetic test now asserts that every tick within half a window of the vmin crossing is excluded, the last full-window tick is kept, the unmasked series still sees the spike, no spike leaks into counted ticks, and a vmin override takes effect. A new harness-level test runs the mock plant (b 9) with spec vmin 0 vs 50 and gets different a_comb margins.
+2. **compositional.md** now states in the md itself:
+   - Plant caveats paragraph near the top: measured t0 actor speeds rear 18.94/20 (5.3% low), pass 15.50/16 and adj 15.50/16 (3.2% low), with the unpinned last drag tick / engine braking cause.
+   - RC15 disclosure inside the RC15 section.
+   - RC18 claims split into clean (the command passes a_lat-only, G 0.194, peak a_lat 6.13; bypass_left feasible under both limits, a_lat 7.13 / a_comb 7.14 at 22 m/s, R_REF) and sensitive. The mask-variant table, same scene v 22 gap 42:
+     - (a) zero before smoothing: command a_long 8.92 / a_comb 10.7; brake_hold peak not inspected, G -0.174 under both specs, a_comb margin +0.056 in the v 18 scenes.
+     - (b) mask after smoothing: command 13.76 / 13.77 at v 6.0; brake_hold 14.93 / 14.93 at v 5.9. Both refuted, via the leaked lock spike.
+     - (c) full window: command 8.92 / 10.71 at t 0.95 s, v 17.8; brake_hold 8.79 / 8.79 at t 0.80 s, v 19.1. Both exceed 8, now at brake onset rather than at the stop. The command's a_comb margin is -0.339.
+   - No physical claim beyond the measured peaks. The verdict is sensitive to how the end-of-stop transient is handled, and in (c) brake_hold exceeds 8 at brake onset too. RC18's only clean positive is the feasible alternative.
+   - dyn_margin values rounded in the peaks table.
+3. **Task 4 RC07 re-run** (scripts/carla_core.py, new keys `rc07_scan_al8_fixplant`, `rc07_sel_al8_fixplant`, library id `..._fixplant`; other core sweeps cached and untouched). `core.md` RC07 section updated with a one-line re-run note; the previous text is in `mining/results/carla/core_before_rc07_rerun.md`.
+   - Rear t0 speed is now 17.14 vs 18 nominal (4.8% low; was 15.90).
+   - The full three-condition contrast NO LONGER holds at gap 34 / rear_gap 80 / rear_v 18: bypass_left is now -inf there. It holds in two scenes: (26, 100, 18) and (34, 100, 18). By the unchanged selection rule the selected scene is now gap 34, rear_gap 100, rear_v 18 (bypass_then_stop -inf, bypass_then_return 0.119, brake_hold 0.105, bypass_left 0.127; evidence R_REF). The scene was not re-tuned. There is still no full-contrast scene at rear_v 24.
+   - Other Task 4 results (RC03, RC20, RC12, RC19) use static or no moving actors and were not re-run.
+4. `policies.py` `_obstacle_passed` now uses `ob.ego_hl` instead of 2.3.

@@ -105,7 +105,7 @@ class BaselineThenHandover(Policy):
 
 def _obstacle_passed(policy, ob):
     """True once an obstacle in the ego/adjacent lane has been SEEN and none remains ahead or alongside (observations only)."""
-    ahead = [o for o in ob.objs if o["dx"] > -(o["hl"] + 2.3 + 1.0) and abs(o["dlat"]) <= 1.6 * ob.lane_w]
+    ahead = [o for o in ob.objs if o["dx"] > -(o["hl"] + ob.ego_hl + 1.0) and abs(o["dlat"]) <= 1.6 * ob.lane_w]
     if ahead:
         policy.seen = True
     return bool(getattr(policy, "seen", False) and not ahead)

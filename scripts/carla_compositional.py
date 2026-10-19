@@ -38,6 +38,7 @@ CFG = M.DEFAULT_V2
 TAU = 0.25
 DECEL_TARGET = CC.DECEL_TARGET
 TAG = f"al{CP.A_LAT_MAX:g}c{CP.A_COMB_MAX:g}v{H.A_COMB_VMIN:g}m2"      # m2: movers pinned to declared speed in warm-up + mask after smoothing
+TAG18 = TAG + "fw"      # fw: whole-smoothing-window speed mask (fix round 2); RC18 sweeps only
 SCOPE = "carla_finite_replay"
 gval = CC.gval
 
@@ -330,10 +331,10 @@ def run_rc18(ctx):
         for g in gaps:
             th = {"gap_m": float(g), "v_mps": v, "tau_s": TAU}
             for comb in (False, True):
-                res[(v, g, comb)] = ctx.point(f"rc18_{TAG}", f"{v:g}_{g}_{int(comb)}",
+                res[(v, g, comb)] = ctx.point(f"rc18_{TAG18}", f"{v:g}_{g}_{int(comb)}",
                                               lambda th=th, comb=comb: ctx.run("RC18", th, library=CP.rc18_library(RC18_LCS, 2.0),
                                                                               spec=CP.rc18_spec(th, CFG, comb=comb)),
-                                              library_id=f"rc18_lcs{'-'.join(map(str, RC18_LCS))}_{TAG}", comb=comb)
+                                              library_id=f"rc18_lcs{'-'.join(map(str, RC18_LCS))}_{TAG18}", comb=comb)
             print("RC18", v, g, rc18_refuted_by_comb(res[(v, g, False)], res[(v, g, True)]), flush=True)
     return res
 
@@ -462,6 +463,15 @@ def report(ctx, r04, r05, r06, r08, r15, r18, sel, tight):
       "**Disclosure:** CARLA's tyre friction in this profile is non-physical (`friction_fixed` 5.0, braking set through brake torque), so CARLA's own tyre limit is not the authority; "
       "the declared 8.0 m/s^2 limits are the physical-plausibility authority and enter only as margins (they make a manoeuvre a non-witness, never a hand-written label).\n")
     w("Selection rules were declared in the script header before the run; every scan row is reported below.\n")
+    nominal = {"RC05": ("rear", sel["RC05"]["sel"][2] if sel["RC05"] else None, sel["RC05"]["audit"]["gap_closes"] if sel["RC05"] else None),
+               "RC06": ("pass", sel["RC06"]["sel"][2] if sel["RC06"] else None, sel["RC06"]["audit"] if sel["RC06"] else None),
+               "RC15": ("adj", sel["RC15"]["sel"][2] if sel["RC15"] else None, sel["RC15"]["audit"]["adj_yields"] if sel["RC15"] else None)}
+    meas = "; ".join(f"{c} `{n}` {a['others'][n]['v_start']:.2f} measured at the first tick vs {nv:g} nominal ({100 * (nv - a['others'][n]['v_start']) / nv:.1f}% low)"
+                     for c, (n, nv, a) in nominal.items() if a is not None)
+    w("**Plant caveats.** Moving non-ego actors are pinned to their declared speed during warm-up (fix round 1; before it a 20 m/s car started at 17 m/s because the clutch engagement drags every car down and the PI hold cannot recover in 2 s). "
+      f"A residual shortfall remains in this run: {meas}. Cause: the last drag tick before t0 is not pinned, and with the single-gear drivetrain engine braking removes about 0.5-0.8 m/s per tick at throttle below 0.9. "
+      "The declared theta speeds are therefore upper bounds of what CARLA ran; the ego starts on target, and all margins below are for the measured speeds. "
+      "Second caveat: CARLA's brake model locks the wheels at the end of a stop (-28 to -35 m/s^2 for about 4 ticks below about 4.3 m/s); see the a_comb mask above and the RC18 section.\n")
     # ---- per-case table
     w("## Per-case table\n")
     w("| case | scanned scenes | scenes with the declared contrast | selected scene | label (evidence class) | witness policy | refuted policies in selected scene |")
@@ -485,7 +495,7 @@ def report(ctx, r04, r05, r06, r08, r15, r18, sel, tight):
     if s is None:
         w(f"| RC18 | {len(r18) // 2} | {ncomb} | NONE | - | no command passes a_lat-only and is refuted by a_comb | - |")
     else:
-        w(f"| RC18 | {len(r18) // 2} | {ncomb} | {s['sel']} | {ev_row(s['rec_comb'])} | {s.get('witness', 'none (no feasible alternative)')} | {', '.join(s['cmds'])} refuted by a_comb |")
+        w(f"| RC18 | {len(r18) // 2} | {ncomb} | {s['sel']} | {ev_row(s['rec_comb'])} | {s.get('witness', 'none (no feasible alternative)')} | {', '.join(s['cmds'])} passes a_lat-only, fails once a_comb_max is added |")
     # ---- RC04
     w("\n## RC04: brake then change lanes\n")
     w("Library (per lc_time L, L in 1.6 and 2.0): brake_hold, lane_follow, immediate_lane_change (Bypass, L), staged_brake_{p}_change (StagedBrakeChange, L) with p = 0.4, 0.8 in the base grid and p = 0.2, 0.4, 0.6, 0.8, 1.0 in the extended grid. "
@@ -556,6 +566,7 @@ def report(ctx, r04, r05, r06, r08, r15, r18, sel, tight):
         w(f"| {'closed lane' if closed else 'open lane'} | {r['evidence_class']} | {mrows(r)} | {rg} |")
     # ---- RC15
     w("\n## RC15: yielding must be observed\n")
+    w("**Disclosure.** In this grid brake_hold is a witness in BOTH worlds, so the evidence label (R_REF) carries no information about whether the neighbour yields; the yield / no-yield contrast lives only in the per-policy margins (always_merge refuted in adj_nonyield). The blocker-inside-stop-distance grid at the end of this file tests whether a label-level contrast appears when brake_hold cannot be a witness.\n")
     w("v = 10; adjacent vehicle in the left lane behind the ego. Worlds (mode fixed per world): `adj_yields` (starts reacting at t = 0.5 s, +0.5 s reaction, brakes 3 m/s^2 to 5 m/s) and `adj_nonyield`. "
       "Library: always_merge, observe_yield_else_fallback (merge once the neighbour's closing speed has dropped by 1.5 m/s, else brake after 2.0 s), brake_hold, lane_follow.\n")
     w("| blocker gap | adj_gap | adj_v | evidence | contrast | margins (adj_yields/adj_nonyield) |\n|---|---|---|---|---|---|")
@@ -599,13 +610,25 @@ def report(ctx, r04, r05, r06, r08, r15, r18, sel, tight):
             pt = dp.get("peak_times", {})
             at = lambda k: (f"@ {pt[k]['t']:.2f} s, {pt[k]['v']:.1f} m/s" if k in pt else "")
             w(f"| {p} | {fm(dp.get('a_lat'))} | {fm(dp.get('a_long_smoothed'))} {at('a_long')} | {fm(dp.get('a_comb'))} {at('a_comb')} | "
-              f"{fm(dp.get('a_comb_unmasked'))} {at('a_comb_unmasked')} | {dp.get('a_long_smoothed', 0) >= lim} | {dp.get('dyn_margin')} |")
+              f"{fm(dp.get('a_comb_unmasked'))} {at('a_comb_unmasked')} | {dp.get('a_long_smoothed', 0) >= lim} | { {n: round(x, 3) for n, x in dp.get('dyn_margin', {}).items()} } |")
         cmd_dp = s["rec_comb"]["traces"][f"{s['cmds'][0]}/static_blocker"]["margin"]["dyn_peaks"]
-        if cmd_dp["a_long_smoothed"] >= lim:
-            w(f"\n**Framing.** The refuted command's peak a_long ({cmd_dp['a_long_smoothed']:.2f}) already exceeds {lim:g} m/s^2 on its own, so its refutation holds for the longitudinal acceleration alone; "
-              "it is NOT shown to be an effect of the combination.  The a_comb margin is the declared friction-circle authority, but these numbers do not isolate a combined-only violation.")
-        else:
-            w(f"\n**Framing.** The command's peak a_long ({cmd_dp['a_long_smoothed']:.2f}) stays below {lim:g} m/s^2 while its a_comb peak ({cmd_dp['a_comb']:.2f}) exceeds it: the violation is a combined-limit effect.")
+        bh_dp = s["rec_comb"]["traces"]["brake_hold/static_blocker"]["margin"]["dyn_peaks"]
+        alt_dp = s["rec_comb"]["traces"][f"{s['feasible_alternatives'][0]}/static_blocker"]["margin"]["dyn_peaks"] if s["feasible_alternatives"] else None
+        w("\n**RC18 claims, by strength of evidence.**\n")
+        w("Clean (independent of the end-of-stop handling):")
+        w(f"- The command `{s['cmds'][0]}` passes the a_lat-only spec (G {fm(gval(s['rec_nocomb']['R_raw'][[p for p in s['rec_nocomb']['policies']].index(s['cmds'][0])][0]))}; its peak a_lat is {cmd_dp['a_lat']:.2f} < {CP.A_LAT_MAX:g}).")
+        if alt_dp:
+            w(f"- `{s['feasible_alternatives'][0]}` (keep speed, lc 2.0) is feasible under BOTH limits: peak a_lat {alt_dp['a_lat']:.2f}, a_comb {alt_dp['a_comb']:.2f} at v >= 22 m/s (no stop involved), evidence {s['rec_comb']['evidence_class']}.")
+        w("\nSensitive to the handling of the end-of-stop wheel-lock transient (the CARLA brake model gives -28 to -35 m/s^2 for about 4 ticks below about 4.3 m/s) and, in variant (c), a brake-onset peak at v 17-19 m/s:\n")
+        w("| mask variant | `" + s["cmds"][0] + "`: peak a_long / a_comb | brake_hold: peak a_long / a_comb | verdict |\n|---|---|---|---|")
+        w("| (a) raw zeroed below 5 m/s BEFORE smoothing (superseded run 2, same scene v 22, gap 42) | 8.92 / 10.7 (a_comb margin -0.339) | peak not inspected at this scene; its G is -0.174 under both specs (clearance), and in the v 18 scenes its a_comb margin was +0.056 | command refuted; brake_hold not shown to be |")
+        w("| (b) mask AFTER smoothing, window may straddle the edge (superseded run 4) | 13.76 @ 2.80 s, v 6.0 / 13.77 | 14.93 @ 2.85 s, v 5.9 / 14.93 | both refuted: the lock spike leaks into ticks just above 5 m/s |")
+        w(f"| (c) full window above 5 m/s (this run, ruling) | {cmd_dp['a_long_smoothed']:.2f} / {cmd_dp['a_comb']:.2f} @ {cmd_dp['peak_times']['a_comb']['t']:.2f} s, v {cmd_dp['peak_times']['a_comb']['v']:.1f} | "
+          f"{bh_dp['a_long_smoothed']:.2f} / {bh_dp['a_comb']:.2f} @ {bh_dp['peak_times']['a_comb']['t']:.2f} s, v {bh_dp['peak_times']['a_comb']['v']:.1f} | "
+          f"command a_comb {'>' if cmd_dp['a_comb'] > lim else '<='} {lim:g} ({'refuted' if cmd_dp['a_comb'] > lim else 'not refuted'}); brake_hold a_comb {'>' if bh_dp['a_comb'] > lim else '<='} {lim:g} ({'refuted' if bh_dp['a_comb'] > lim else 'not refuted'}) |")
+        w("\nTherefore: whether the command is 'refuted by the acceleration authority' depends on how the end-of-stop transient is treated, and in variant (b) brake_hold is refuted for the same reason. "
+          "In variant (c) the peaks are at brake onset (t <= 1 s, v 17-19 m/s), not at the stop, so both policies exceed 8 m/s^2 there by the measured smoothed acceleration; the verdict is read from the table row above; no claim is made beyond those measured peaks (the numbers do not separate a combined-limit effect from a longitudinal one, and CARLA's tyre/brake model is not the physical authority). "
+          "The scene-level flip R_REF -> U_LIBRARY at v 22, gap 34 is relative to this finite library only.")
         w(f"\nFull-library re-run vs scan max |dG| = {s['rerun']}.  Audited refuted-command trace (`{s['cmds'][0]}`):")
         L.extend(trace_lines(s["audit_cmd"]))
         if "audit" in s:
