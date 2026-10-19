@@ -35,7 +35,7 @@ def run(case, th, b=6.2, **kw):
     return rec
 
 
-def test_rc04_staged_brake_change_is_the_only_supported_continuation():
+def test_rc04_mock_staged_passes_where_brake_hold_and_immediate_change_fail():
     rec = run("RC04", {"gap_m": 30.0, "v_mps": 18.0, "tau_s": 0.25})
     r = rows(rec)
     assert r["brake_hold"][0] < CFG.eps                                       # cannot stop in time
@@ -139,3 +139,30 @@ def test_script_helpers_median_and_contrast_on_synthetic_rows():
     assert CCP.rc04_contrast(r) and CCP.median_key([3, 1, 2]) == 2 and CCP.median_key([]) is None
     r2 = {"policies": ["commit_lane_change", "abort_and_stabilize"], "R_raw": [[0.1, "-inf"], [0.1, 0.2]]}
     assert CCP.rc05_contrast(r2)
+
+
+def test_accel_series_mask_applies_after_smoothing_and_vmin_overrides_default():
+    n = 40
+    speeds = np.linspace(10.0, 0.0, n)                         # crosses 5 m/s at index ~20
+    ax = np.full(n - 1, -6.0)
+    ax[24:28] = -30.0                                          # wheel-lock spike below 5 m/s
+    a_lat = np.zeros(n)
+    acc = H.accel_series(speeds, ax, a_lat, 5.0)
+    fast = speeds >= 5.0
+    assert np.all(acc["a_comb"][~fast] == 0.0) and np.all(acc["a_long_masked"][~fast] == 0.0)   # ticks below vmin excluded
+    assert acc["a_comb_unmasked"].max() > 20.0                                              # unmasked still sees the spike
+    assert acc["a_comb"].max() <= 6.0 + 1e-9                                                # masked: only the 6 m/s^2 plateau
+    # mask is applied to the SMOOTHED series: the first fast ticks keep their full smoothing window (no zero-padding artefact)
+    k = int(np.argmax(fast[::-1]) and (n - 1 - np.argmax(fast[::-1])))
+    assert abs(acc["a_comb"][k] - 6.0) < 1e-9
+    low = H.accel_series(speeds, ax, a_lat, 0.5)               # a spec vmin overrides the default
+    assert low["a_comb"].max() > 20.0 and low["peaks"]["a_comb"]["v"] < 5.0
+
+
+def test_harness_uses_spec_a_comb_vmin_and_records_peak_times():
+    th = {"gap_m": 38.0, "v_mps": 18.0, "tau_s": 0.25}
+    sp = CP.rc18_spec(th, CFG, comb=True)
+    assert sp["a_comb_vmin"] == H.A_COMB_VMIN
+    res = H.run_episode(KinematicPlant(b_max=6.2), sp, P.BrakeHold(), CP.CLEAN, CFG)
+    pt = res.margin["dyn_peaks"]["peak_times"]
+    assert pt["a_long"]["v"] >= H.A_COMB_VMIN and "a_comb_unmasked" in res.margin["dyn_peaks"]

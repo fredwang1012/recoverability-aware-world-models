@@ -44,7 +44,7 @@ class ObservationFeed:
                 continue
             objs.append({"dx": a.x - ego.x, "dlat": a.lat - ego.lat, "dv": a.v - ego.v, "hl": a.hl, "hw": a.hw})
         objs.sort(key=lambda o: (o["dx"], o["dlat"]))            # anonymous: order carries no actor identity
-        ob = Obs(t_capture=snap.t, t_available=snap.t + self.delay_k * self.dt, v=ego.v, lane_w=self.lane_w, objs=objs)
+        ob = Obs(t_capture=snap.t, t_available=snap.t + self.delay_k * self.dt, v=ego.v, lane_w=self.lane_w, objs=objs, ego_hl=ego.hl)
         self.pending.append((snap.k + self.delay_k, ob))
 
     def deliver(self, k):

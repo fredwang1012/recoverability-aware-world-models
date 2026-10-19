@@ -31,12 +31,13 @@ sys.path.insert(0, HERE)
 import margin as M
 from cases import compositional as CP
 import carla_core as CC
+from sim import harness as H
 
 OUT = "results/carla/compositional"
 CFG = M.DEFAULT_V2
 TAU = 0.25
 DECEL_TARGET = CC.DECEL_TARGET
-TAG = f"al{CP.A_LAT_MAX:g}c{CP.A_COMB_MAX:g}v{CP.H.A_COMB_VMIN:g}"
+TAG = f"al{CP.A_LAT_MAX:g}c{CP.A_COMB_MAX:g}v{H.A_COMB_VMIN:g}m2"      # m2: movers pinned to declared speed in warm-up + mask after smoothing
 SCOPE = "carla_finite_replay"
 gval = CC.gval
 
@@ -288,6 +289,30 @@ def run_rc15(ctx):
     return res
 
 
+def tight_gaps(v, ks=(1, 4, 7, 10)):
+    """Blocker gaps INSIDE the braking envelope (stop_dist(v) - k m): brake_hold cannot be a witness there."""
+    return [float(int(stop_dist(v)) - k) for k in ks]
+
+
+def run_tight(ctx):
+    """RC15 / RC06 with the static blocker inside stop distance, so merging is the only possible witness (added in fix round 1)."""
+    r15, r06 = {}, {}
+    for v in (10.0, 14.0, 18.0):
+        for g in tight_gaps(v):
+            for ag in (25.0, 35.0):
+                for var, kw in (("default", {}), ("fast", {"trigger_t": 0.0, "react_s": 0.2})):
+                    th = {"gap_m": g, "v_mps": v, "tau_s": TAU, "adj_gap_m": ag, "adj_v_mps": v + 6.0, "yield_variant": var}
+                    r15[(v, g, ag, var)] = ctx.point(f"rc15tight_{TAG}", f"{v:g}_{g:g}_{ag:g}_{var}",
+                                                     lambda th=th, kw=kw: ctx.run("RC15", th, worlds=CP.rc15_worlds(**kw)),
+                                                     library_id=f"rc15tight_lc2.0_wait2.0_drop1.5_{TAG}")
+    for v in (10.0, 14.0):
+        for g in tight_gaps(v, (1, 5)):
+            th = {"gap_m": g, "v_mps": v, "tau_s": TAU, "pass_gap_m": 10.0, "pass_v_mps": v + 10.0}
+            r06[(v, g)] = ctx.point(f"rc06tight_{TAG}", f"{v:g}_{g:g}", lambda th=th: ctx.run("RC06", th), library_id=f"rc06tight_lc2.0_{TAG}")
+    print("TIGHT RC15", {k: (r["evidence_class"], rc15_contrast(r)) for k, r in r15.items() if rc15_contrast(r) or r["evidence_class"] == "R_REF"}, flush=True)
+    return r15, r06
+
+
 def run_rc08(ctx):
     res = {}
     for closed in (False, True):
@@ -393,12 +418,16 @@ def ev_row(r):
     return r["evidence_class"]
 
 
+def _rnd(o):
+    return {k: _rnd(v) for k, v in o.items()} if isinstance(o, dict) else (round(o, 3) if isinstance(o, float) else o)
+
+
 def trace_lines(a, indent="  "):
     L = [f"{indent}- run `{a['run']}`: termination {a['termination']}, contact events {a['contact_events'] or 'none'}, G (re-run) {fm(gval(a['G']))}",
          f"{indent}- ego v {a['ego_v_start']:.2f} -> {a['ego_v_end']:.2f} m/s; lateral range [{a['ego_lat_min']:.2f}, {a['ego_lat_max']:.2f}] m, end {a['ego_lat_end']:.2f}; "
          f"x_end {a['x_end']:.1f}; max per-tick lateral step {a['max_lat_step_m']:.3f} m = {a['max_lat_step_over_v_dt']:.3f} x (v*dt) (continuous, no teleport)",
          f"{indent}- min clearance to each actor (m): {({k: (None if v is None else round(v, 2)) for k, v in a['min_clearance_m'].items()})}",
-         f"{indent}- dynamic peaks: {({k: (round(v, 2) if not isinstance(v, dict) else {n: round(x, 3) for n, x in v.items()}) for k, v in (a['dyn_peaks'] or {}).items()})}",
+         f"{indent}- dynamic peaks: {_rnd(a['dyn_peaks'] or {})}",
          f"{indent}- commands (decision_t -> effective_t): " + ", ".join(f"{c['long']}/{c['lat_target']} {c['decision_t']:.2f}->{c['effective_t']:.2f}" for c in a["commands"])]
     for n, o in a["others"].items():
         L.append(f"{indent}- actor `{n}`: v {o['v_start']:.2f} -> {o['v_end']:.2f}, lat_end {o['lat_end']:.2f}, closest |dx| to ego {o['min_abs_dx']:.1f} m")
@@ -421,7 +450,7 @@ def validate_all():
     return n, bad_
 
 
-def report(ctx, r04, r05, r06, r08, r15, r18, sel):
+def report(ctx, r04, r05, r06, r08, r15, r18, sel, tight):
     L, w = [], None
     w = L.append
     w("# CARLA compositional cases (Task 6: RC04, RC05, RC06, RC08, RC15, RC18)\n")
@@ -429,7 +458,7 @@ def report(ctx, r04, r05, r06, r08, r15, r18, sel):
       "Records: `results/carla/compositional/*.jsonl`. Labels are `contract.classify` output only. G cells below read `world1/world2` (-inf = hard failure, None = unrun).\n")
     w(f"**Authority.** Every spec declares `a_lat_max = {CP.A_LAT_MAX:g}` m/s^2 (dynamic-limit margin from |v * yaw_rate|, as in the core cases); RC18 additionally declares "
       f"`a_comb_max = {CP.A_COMB_MAX:g}` m/s^2, a friction-circle margin sqrt(a_long^2 + a_lat^2) <= limit from MEASURED accelerations "
-      f"(a_long = tick difference of ego speed, centred {__import__('sim.harness', fromlist=['x']).A_LONG_SMOOTH_TICKS}-tick moving average = 0.25 s, declared before any run; a_lat = |v * yaw_rate| per tick, unsmoothed; ticks with ego speed < {CP.H.A_COMB_VMIN:g} m/s are excluded from a_comb because CARLA's brake model locks the wheels at the end of a stop, measured -28..-35 m/s^2 for ~4 ticks below ~4.3 m/s in a brake_hold diagnostic at v 18; the unmasked peak is still recorded as `a_comb_unmasked`). "
+      f"(a_long = tick difference of ego speed, centred {H.A_LONG_SMOOTH_TICKS}-tick moving average = 0.25 s, declared before any run; a_lat = |v * yaw_rate| per tick, unsmoothed; ticks with ego speed < {H.A_COMB_VMIN:g} m/s are excluded from a_comb (the mask is applied AFTER smoothing, so no smoothing window is truncated) because CARLA's brake model locks the wheels at the end of a stop, measured -28..-35 m/s^2 for ~4 ticks below ~4.3 m/s in a brake_hold diagnostic at v 18; the unmasked peak is still recorded as `a_comb_unmasked`). "
       "**Disclosure:** CARLA's tyre friction in this profile is non-physical (`friction_fixed` 5.0, braking set through brake torque), so CARLA's own tyre limit is not the authority; "
       "the declared 8.0 m/s^2 limits are the physical-plausibility authority and enter only as margins (they make a manoeuvre a non-witness, never a hand-written label).\n")
     w("Selection rules were declared in the script header before the run; every scan row is reported below.\n")
@@ -459,7 +488,7 @@ def report(ctx, r04, r05, r06, r08, r15, r18, sel):
         w(f"| RC18 | {len(r18) // 2} | {ncomb} | {s['sel']} | {ev_row(s['rec_comb'])} | {s.get('witness', 'none (no feasible alternative)')} | {', '.join(s['cmds'])} refuted by a_comb |")
     # ---- RC04
     w("\n## RC04: brake then change lanes\n")
-    w("Library (per lc_time L, L in 1.6 and 2.0): brake_hold, lane_follow, immediate_lane_change (Bypass, L), staged_brake_0.4_change and staged_brake_0.8_change (StagedBrakeChange, L). "
+    w("Library (per lc_time L, L in 1.6 and 2.0): brake_hold, lane_follow, immediate_lane_change (Bypass, L), staged_brake_{p}_change (StagedBrakeChange, L) with p = 0.4, 0.8 in the base grid and p = 0.2, 0.4, 0.6, 0.8, 1.0 in the extended grid. "
       "Immediate lane change is a different candidate at each L; scenes where the immediate change at lc 2.0 already passes are therefore not witnesses of the staged policy in the lc-2.0 library.\n")
     w("| grid | lc | v | gap | evidence | contrast | margins |\n|---|---|---|---|---|---|---|")
     for (lib, lc, v, g), r in sorted(r04.items()):
@@ -478,10 +507,11 @@ def report(ctx, r04, r05, r06, r08, r15, r18, sel):
           "Nothing is forced.")
         near = [(k, mw(r)) for k, r in sorted(r04.items())
                 if any(all_ok(gs) for p, gs in mw(r).items() if p.startswith("staged_brake")) and any_bad(mw(r)["brake_hold"])]
+        imm_ok = [k for k, m in near if all_ok(m["immediate_lane_change"])]
         w("Scenes where a staged policy passes and brake_hold fails (the only candidates): " +
           (("; ".join(f"{k}: immediate_lane_change={'/'.join(fm(x) for x in m['immediate_lane_change'])}" for k, m in near)) if near else "none") +
-          ".  Where such a scene exists the immediate lane change passes as well, so the staged policy is not the unique supported continuation; "
-          "elsewhere brake_hold fails and every staged policy fails too (braking first spends the distance the lane change needs).")
+          f".  Of these, the immediate lane change also passes in {len(imm_ok)} of {len(near)}" +
+          (" (so the staged policy is not the unique supported continuation there)" if imm_ok else "") + ".")
     # ---- RC05
     w("\n## RC05: abort an unsafe lane change\n")
     w("Every policy first executes a physical left lane change (prefix 1.0 s, lc_time 3.0) inside the episode; the rear vehicle in the target lane is hidden until t = 1.25 s. "
@@ -555,16 +585,27 @@ def report(ctx, r04, r05, r06, r08, r15, r18, sel):
     flips = [(v, g, r18[(v, g, False)]["evidence_class"], r["evidence_class"]) for (v, g, c), r in sorted(r18.items())
              if c and r18[(v, g, False)]["evidence_class"] != r["evidence_class"]]
     w(f"\nScenes whose evidence class changes when the combined limit is added (a_lat-only -> a_lat + a_comb): {flips or 'none'}.  "
-      "A change R_REF -> U_LIBRARY means the only witness was a command outside the combined authority: the scene is then negative only relative to this library, never U_MODEL.")
+      "A change R_REF -> U_LIBRARY means the only witness was a command outside the declared acceleration authority: the scene is then negative only relative to this library, never U_MODEL.")
     s = sel["RC18"]
     if s:
         v, g = s["sel"]
-        w(f"\nSelected scene v {v:g}, gap {g}: commands refuted only by the combined limit: {s['cmds']}; feasible alternatives under both limits: {s['feasible_alternatives'] or 'NONE in this library'} "
+        w(f"\nSelected scene v {v:g}, gap {g}: commands that pass the a_lat-only spec and fail once a_comb_max is added: {s['cmds']}; feasible alternatives under both limits: {s['feasible_alternatives'] or 'NONE in this library'} "
           f"(evidence under both limits: {s['rec_comb']['evidence_class']}).")
-        w("Recorded peaks (m/s^2) for the refuted command(s) and the alternative, from the harness traces:\n\n| policy | peak a_lat | peak smoothed a_long | peak a_comb | dyn margins |\n|---|---|---|---|---|")
-        for p in list(s["cmds"]) + s["feasible_alternatives"][:1]:
+        w("Recorded peaks (m/s^2) with the time and ego speed at each peak (a_long / a_comb only count while v >= " + f"{H.A_COMB_VMIN:g} m/s), from the harness traces of the a_lat + a_comb run:\n\n"
+          "| policy | peak a_lat | peak a_long (masked) @ t, v | peak a_comb (masked) @ t, v | peak a_comb unmasked @ t, v | a_long alone >= limit | dyn margins |\n|---|---|---|---|---|---|---|")
+        lim = CP.A_COMB_MAX
+        for p in list(s["cmds"]) + [x for x in ("brake_hold",) if x not in s["cmds"]] + s["feasible_alternatives"][:1]:
             dp = s["rec_comb"]["traces"][f"{p}/static_blocker"]["margin"].get("dyn_peaks", {})
-            w(f"| {p} | {fm(dp.get('a_lat'))} | {fm(dp.get('a_long_smoothed'))} | {fm(dp.get('a_comb'))} | {dp.get('dyn_margin')} |")
+            pt = dp.get("peak_times", {})
+            at = lambda k: (f"@ {pt[k]['t']:.2f} s, {pt[k]['v']:.1f} m/s" if k in pt else "")
+            w(f"| {p} | {fm(dp.get('a_lat'))} | {fm(dp.get('a_long_smoothed'))} {at('a_long')} | {fm(dp.get('a_comb'))} {at('a_comb')} | "
+              f"{fm(dp.get('a_comb_unmasked'))} {at('a_comb_unmasked')} | {dp.get('a_long_smoothed', 0) >= lim} | {dp.get('dyn_margin')} |")
+        cmd_dp = s["rec_comb"]["traces"][f"{s['cmds'][0]}/static_blocker"]["margin"]["dyn_peaks"]
+        if cmd_dp["a_long_smoothed"] >= lim:
+            w(f"\n**Framing.** The refuted command's peak a_long ({cmd_dp['a_long_smoothed']:.2f}) already exceeds {lim:g} m/s^2 on its own, so its refutation holds for the longitudinal acceleration alone; "
+              "it is NOT shown to be an effect of the combination.  The a_comb margin is the declared friction-circle authority, but these numbers do not isolate a combined-only violation.")
+        else:
+            w(f"\n**Framing.** The command's peak a_long ({cmd_dp['a_long_smoothed']:.2f}) stays below {lim:g} m/s^2 while its a_comb peak ({cmd_dp['a_comb']:.2f}) exceeds it: the violation is a combined-limit effect.")
         w(f"\nFull-library re-run vs scan max |dG| = {s['rerun']}.  Audited refuted-command trace (`{s['cmds'][0]}`):")
         L.extend(trace_lines(s["audit_cmd"]))
         if "audit" in s:
@@ -573,6 +614,22 @@ def report(ctx, r04, r05, r06, r08, r15, r18, sel):
     else:
         w("\nNo command passes the a_lat-only spec and is refuted by a_comb in the searched grid; RC18 is physically implausible/uninformative at this plant (decel 6.2 m/s^2 leaves 5.05 m/s^2 of lateral budget) "
           "or the gap grid missed the window; no positive RC18 contrast is claimed.")
+    r15t, r06t = tight
+    w("\n## RC15 / RC06 with the blocker inside stop distance (merge is the only possible witness)\n")
+    w("RC15 disclosure: in the main RC15 grid brake_hold is a witness in BOTH worlds, so the evidence label (R_REF) carries no information about whether the neighbour yields; "
+      "the yield/no-yield contrast lives only in the per-policy margins (always_merge refuted in adj_nonyield).  The grid below puts the static blocker inside the braking envelope "
+      "(gap = stop_dist(v) - k m, stop_dist = v^2/(2*6.2) + 0.3 v + 1), v 10/14/18, adj_v = v + 6, adj_gap 25/35, for the default yield timing (reacts from t = 0.5 s) and a fast one "
+      "(trigger_t 0, react 0.2 s).\n")
+    w("| v | gap | adj_gap | yield timing | evidence | contrast | margins (adj_yields/adj_nonyield) |\n|---|---|---|---|---|---|---|")
+    for k, r in sorted(r15t.items()):
+        w(f"| {k[0]:g} | {k[1]:g} | {k[2]:g} | {k[3]} | {r['evidence_class']} | {rc15_contrast(r)} | {mrows(r)} |")
+    merge_only = [k for k, r in r15t.items() if all(not ok(g) for g in mw(r)["brake_hold"]) and all_ok(mw(r)["observe_yield_else_fallback"])]
+    info = [k for k, r in r15t.items() if r["evidence_class"] == "U_INFORMATION"]
+    w(f"\nTight scenes where brake_hold fails and observe_yield_else_fallback passes both worlds (a recoverability-relevant contrast: always_merge refuted in the bad world, R_REF only through observation): {merge_only or 'NONE'}.  "
+      f"Scenes labelled U_INFORMATION: {info or 'none'}.  R_REF scenes: {sorted(k for k, r in r15t.items() if r['evidence_class'] == 'R_REF') or 'none'}.")
+    w("\nRC06 tight scenes (pass_gap 10, pass_v = v + 10):\n\n| v | gap | evidence | margins |\n|---|---|---|---|")
+    for k, r in sorted(r06t.items()):
+        w(f"| {k[0]:g} | {k[1]:g} | {r['evidence_class']} | {mrows(r)} |")
     n, bad_ = validate_all()
     w(f"\n## Record validation\n\n{n} records in `results/carla/compositional/` checked with validate_records.check_record: {len(bad_)} failures.")
     for b in bad_[:10]:
@@ -591,7 +648,8 @@ def main():
     r04, r05, r06 = run_rc04(ctx), run_rc05(ctx), run_rc06(ctx)
     r08, r15, r18 = run_rc08(ctx), run_rc15(ctx), run_rc18(ctx)
     sel = select_and_audit(ctx, r04, r05, r06, r15, r18)
-    text = report(ctx, r04, r05, r06, r08, r15, r18, sel)
+    tight = run_tight(ctx)
+    text = report(ctx, r04, r05, r06, r08, r15, r18, sel, tight)
     open("results/carla/compositional.md", "w", encoding="utf-8", newline="\n").write(text)
     print(text)
 

@@ -215,7 +215,7 @@ class WaitObserveEnter(Policy):
     def _blocked(self, ob):
         p = self.params
         for o in _target_lane_objs(ob, behind_only=False):
-            hs = o["hl"] + 2.3
+            hs = o["hl"] + ob.ego_hl
             if o["dx"] < 0 and -o["dx"] < hs + p["back_m"] + p["back_t"] * max(o["dv"], 0.0):
                 return True
             if o["dx"] >= 0 and o["dx"] < hs + p["front_m"]:
@@ -319,7 +319,7 @@ class AbortIfClosing(LaneChangePrefix):
     def _closing(self, ob):
         for o in ob.objs:
             if o["dx"] < 0 and abs(o["dlat"]) <= 1.6 * ob.lane_w and o["dv"] > 0.5:
-                if (-o["dx"] - o["hl"] - 2.3) / o["dv"] < self.params["ttc_s"]:
+                if (-o["dx"] - o["hl"] - ob.ego_hl) / o["dv"] < self.params["ttc_s"]:
                     return True
         return False
 

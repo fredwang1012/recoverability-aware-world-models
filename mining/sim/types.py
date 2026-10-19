@@ -46,3 +46,4 @@ class Obs:
     v: float
     lane_w: float
     objs: list                  # [{"dx","dlat","dv","hl","hw"}] anonymous, sorted by dx; no names/ids/modes
+    ego_hl: float = 2.3         # the ego's own half length (own geometry, known to the ego)

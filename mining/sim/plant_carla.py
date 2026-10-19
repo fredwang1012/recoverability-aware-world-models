@@ -181,6 +181,12 @@ class CarlaPlant:
                 if n == "ego":
                     v_prev = st.v
                 t, b, s = hold_lane_control(st, ref[n][0], ref[n][1], self.max_steer, pi=pis[n])
+                if n != "ego" and ref[n][1] > 0:
+                    # Moving non-ego actors: the clutch engagement / engine spin-up drags them far below their declared speed (a Mini at 20 m/s
+                    # was 16.8 m/s at t0) and a PI hold cannot recover that in the warm-up.  The ego is re-imposed after its physics control; do
+                    # the same here every warm-up tick, AFTER reading the measured speed: the PI therefore integrates the per-tick drag deficit and
+                    # learns the hold throttle (hold_i), and the actor starts the episode at its declared speed.
+                    self.actors[n].set_target_velocity(C.Vector3D(self.site.f[0] * ref[n][1], self.site.f[1] * ref[n][1], 0.0))
                 # the single-gear drivetrain starts in neutral (gear 0): the first throttle would engage the clutch on a stationary
                 # engine and drag the car down by ~1/3 of its speed.  Engage gear 1 on the first warm-up tick so the engine spin-up
                 # happens (and is absorbed by the cruise controller) before t0.
@@ -199,6 +205,9 @@ class CarlaPlant:
             loc = self._loc(x_new, a["lat"])
             self.actors[n].set_transform(C.Transform(C.Location(loc.x, loc.y, self.actors[n].get_transform().location.z),
                                                     C.Rotation(yaw=self.site.road_yaw)))
+        for n, (_, rv) in ref.items():                          # the same pin before the extra tick, so movers are not left one drag-tick low at t0
+            if n != "ego" and n not in self.static and rv > 0:
+                self.actors[n].set_target_velocity(C.Vector3D(self.site.f[0] * rv, self.site.f[1] * rv, 0.0))
         self.world.tick()                                       # let the transform take effect, then t0
         self._collisions.clear()
         st = self._states()

@@ -39,6 +39,23 @@ A_COMB_VMIN = 5.0                # m/s: a_comb is evaluated only while the ego s
 A_LONG_SMOOTH_TICKS = 5          # 0.25 s centred moving average of the measured longitudinal acceleration (a_comb_max only)
 
 
+def accel_series(speeds, ax_hist, a_lat, vmin, dt=DT):
+    """Longitudinal / combined acceleration series aligned to the state index.  a_long is smoothed FIRST (centred moving average of the
+    measured per-tick acceleration), THEN the ticks with ego speed < vmin are excluded (set to 0) from a_long and a_comb, so the mask edge
+    never zeroes part of a smoothing window.  The unmasked series is returned too.  peaks: time and speed of each series' maximum."""
+    speeds, a_lat = np.asarray(speeds, float), np.asarray(a_lat, float)
+    ax_raw = np.array([0.0] + list(ax_hist))
+    n = len(a_lat)
+    ax_sm = smooth(ax_raw)[:n]
+    fast = speeds[:n] >= vmin
+    a_long = np.where(fast, ax_sm, 0.0)
+    a_comb_u = np.sqrt(ax_sm ** 2 + a_lat ** 2)
+    a_comb = np.where(fast, a_comb_u, 0.0)
+    pk = lambda ser: {"t": float(np.argmax(np.abs(ser)) * dt), "v": float(speeds[int(np.argmax(np.abs(ser)))])}
+    return {"a_long_masked": a_long, "a_comb": a_comb, "a_comb_unmasked": a_comb_u, "fast": fast,
+            "peaks": {"a_long": pk(a_long), "a_comb": pk(a_comb), "a_comb_unmasked": pk(a_comb_u)}}
+
+
 def smooth(x, n=A_LONG_SMOOTH_TICKS):
     """Centred moving average with edge replication (same length as x)."""
     x = np.asarray(x, float)
@@ -151,19 +168,16 @@ def run_episode(plant, spec, policy, world, cfg=M.DEFAULT_V2, seed=0):
     a_lat = np.abs(np.array(speeds) * np.gradient(yaw, dt)) if len(yaw) > 2 else np.zeros(len(speeds))
     dyn = [("a_lat", a_lat, spec["a_lat_max"])] if "a_lat_max" in spec else []
     vmin = spec.get("a_comb_vmin", A_COMB_VMIN)
-    ax_raw = np.array([0.0] + list(ax_hist))             # aligned to the state index (ax_hist[i] is measured during step i -> i+1)
-    fast = np.array(speeds) >= vmin
-    ax_s = smooth(np.where(fast[:len(ax_raw)], ax_raw, 0.0))
-    ax_u = smooth(ax_raw)
-    a_comb_u = np.sqrt(ax_u[:len(a_lat)] ** 2 + a_lat ** 2)
-    a_comb = np.where(fast[:len(a_lat)], np.sqrt(ax_s[:len(a_lat)] ** 2 + a_lat ** 2), 0.0)
+    acc = accel_series(speeds, ax_hist, a_lat, vmin)
+    ax_s, a_comb, a_comb_u = acc["a_long_masked"], acc["a_comb"], acc["a_comb_unmasked"]
     if "a_comb_max" in spec:
         dyn.append(("a_comb", a_comb, spec["a_comb_max"]))
     dyn = dyn or None
     term_ok = False if collision else terminal_test(policy.terminal, ego_hist, np.array(speeds), dt, cfg, spec)
     out = M.compute(trace, cfg, terminal_ok=term_ok, road=spec["road"], dyn=dyn)
-    out["dyn_peaks"] = {"a_lat": float(np.max(a_lat)), "a_long_smoothed": float(np.max(np.abs(ax_s))), "a_comb": float(np.max(a_comb)), "a_comb_unmasked": float(np.max(a_comb_u)),
-                         "dyn_margin": {n: float(np.min((lim - np.abs(ser)) / lim)) for n, ser, lim in (dyn or [])}}
+    out["dyn_peaks"] = {"a_lat": float(np.max(a_lat)), "a_long_smoothed": float(np.max(np.abs(ax_s))), "a_comb": float(np.max(a_comb)),
+                        "a_comb_unmasked": float(np.max(a_comb_u)), "peak_times": acc["peaks"],
+                        "dyn_margin": {n: float(np.min((lim - np.abs(ser)) / lim)) for n, ser, lim in (dyn or [])}}
     goal = spec.get("route_goal")
     route_done = None if goal is None else bool((not collision) and max(p[0] + states["ego"].hl for p in ego_hist) >= goal["x"])
 
