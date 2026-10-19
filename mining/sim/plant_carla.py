@@ -161,6 +161,9 @@ class CarlaPlant:
             if a.get("static"):
                 self.static.add(n)
                 self.actors[n] = self._spawn(a.get("bp", STATIC_BP), a["x"], a["lat"], 0.0, n)
+                if a.get("frozen"):
+                    # unstable two-wheelers (RC16 post) tip over and drift under hand-brake; freeze the body in place (opt-in per actor)
+                    self.actors[n].set_simulate_physics(False)
             else:
                 self.actors[n] = self._spawn(a.get("bp", MOVER_BP), a["x"] - warm_back(a["v"]), a["lat"], a["v"], n)
         self.byid = {a.id: n for n, a in self.actors.items()}
