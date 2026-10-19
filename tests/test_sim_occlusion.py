@@ -198,3 +198,44 @@ def test_rc14_history_conditioned_profiles_differ_and_memory_is_needed():
     assert col(0) != col(1)                                                 # different profiles for the same current frame
     assert all(g >= CFG.eps for g in r["shared_slowdown_then_branch"]) and rec.evidence_class == "R_REF"
     assert min(r["branch_current_frame_only"]) < CFG.eps                    # the current-frame-only policy forgets the vehicle and fails
+
+
+# ----------------------------------------------------------------------------- report helpers (fix round 1)
+def _fake(ev, g_own):
+    pol = ["stop_in_place", "fixed_left", "fixed_right", "shared_slowdown_then_branch"]
+    inf = "-inf"
+    return {"evidence_class": ev, "policies": pol,
+            "R_raw": [[0.1, inf], [inf, 0.09], [0.1, inf], [0.1, g_own]]}
+
+
+def _fake_sweeps():
+    sw = {}
+    for D, cut in ((18.0, 1), (19.0, 2), (21.0, 99)):
+        sw[(14.0, D)] = {round(0.1 * i, 2): (_fake("R_REF", 0.05) if i < cut else _fake("U_INFORMATION", "-inf")) for i in range(6)}
+    return sw
+
+
+def test_sweep_table_columns_align_with_header():
+    sw = _fake_sweeps()
+    times = sorted(sw[(14.0, 18.0)])
+    lines = CO.sweep_table(sorted(sw), sw, times)
+    n = lines[0].count("|")
+    assert all(l.count("|") == n for l in lines)                       # header, separator and every row have the same number of cells
+    assert "analytic t* (sup over prefixes)" in lines[0] and "analytic t* (policy as run)" in lines[0]
+    d21 = [l for l in lines if l.startswith("| 21 ")][0]
+    assert "none (common stop)" in d21
+
+
+def test_transition_figure_renders_and_crosscheck_stats(tmp_path):
+    sw = _fake_sweeps()
+    out = str(tmp_path / "f.png")
+    CO.figure(sw, out)
+    assert os.path.getsize(out) > 5000
+    assert abs(CO.best_value(_fake("R_REF", 0.05)) - 0.05) < 1e-9 and CO.best_value(_fake("U_INFORMATION", "-inf")) == -float("inf")
+    rows = CO.crosscheck_stats(sw, sorted(sw))
+    assert [k[1] for k, _, _ in rows] == [18.0, 19.0]                  # D=21 has no finite analytic t*
+    assert CO.blind_spread(sw, (14.0, 18.0)) == (0.09, 0.09)
+
+
+def test_history_check_threshold_constant():
+    assert 0 < CO.DV_TOL <= 1e-5

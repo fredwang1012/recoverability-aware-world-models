@@ -68,7 +68,7 @@ def library(lc_time=LC_TIME):
 
 
 def rc14_worlds(t_forget, theta):
-    """Both hid placements are SEEN from t = 0 and occluded again from t_forget on (time_since_last_observation = t - t_forget)."""
+    """Both hid placements are SEEN from t = 0 and occluded again from t_forget on (t_forget is the sweep parameter; the time since the last observation at decision time t is t - t_forget, there is no separate field)."""
     kw = {"reveal": {HID: 0.0}, "forget": {HID: t_forget}}
     return [{"name": "seen_left_then_occluded", "actors": {}, "spawn": _spawn(theta, LEFT_LAT), **kw},
             {"name": "seen_own_then_occluded", "actors": {}, "spawn": _spawn(theta, OWN_LAT), **kw}]

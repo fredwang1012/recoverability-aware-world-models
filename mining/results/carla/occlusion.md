@@ -4,15 +4,15 @@ Physics profile `pp_381b4c6e55`, decel target 6.19, eps = 0.0, reserve c = 1.0 m
 
 **Site and mapping.** The custom 2-lane straight (`straight_2lane`, no map change). One STOPPED hidden vehicle `hid` is D m ahead of the ego (bumper gap) in exactly one of the two escape corridors: the ego's own lane (lat 0, the RIGHT lane; corridor = keep lane / stop in lane = info_tree `fixed_right`, world 'blocks RIGHT') or the adjacent LEFT lane (lat -3.5; corridor = change lane = `fixed_left`, world 'blocks LEFT'). Worlds: `hid_left_lane` (staying or stopping is safe; a left change collides) and `hid_own_lane` (only a braking left change works; D < stopping distance so stopping cannot). The vehicle is spawned in CARLA in both worlds (ground truth, static, exact placement), but the ObservationFeed withholds it until `t_reveal`; there is no CARLA occluder. Library: `stop_in_place` (full brake, hold), `fixed_left` (brake and change left at once), `fixed_right` (keep lane at speed), `shared_slowdown_then_branch` (full brake in lane until the object is delivered; then own lane -> change left while still braking, left lane -> keep lane braking; the branch is latched from the delivered history). G cells read `hid_left_lane/hid_own_lane`.
 
-**info_tree reconciliation.** `reference/info_tree.py` has two LATERAL corridors that both need T_lat. On the two-lane site the right corridor is the ego's own lane and needs no lateral move, so the matrix is `build_matrix_two_lane` (added): world A/hid_left_lane has stop/stay/observe succeed (+1) and blind_L fail; world B/hid_own_lane has the same lateral slack expression as before. The binding constraint is the lateral world, so the analytic threshold is unchanged and is also given in closed form, `t_obs_star = t_arr_max - tau - T_lat` (t_arr_max = arrival time under continuous braking, since the branch keeps braking). The mock test checks the closed form against both discrete trees.
+**info_tree reconciliation.** `reference/info_tree.py` has two LATERAL corridors that both need T_lat. On the two-lane site the right corridor is the ego's own lane and needs no lateral move, so the matrix is `build_matrix_two_lane` (added): world A/hid_left_lane has stop/stay/observe succeed (+1) and blind_L fail; world B/hid_own_lane has the same lateral slack expression as before. The binding constraint is the lateral world, so the analytic threshold is unchanged and is also given in closed form, `t_obs_star = t_arr_max - tau - T_lat` (t_arr_max = arrival time under continuous braking, since the branch keeps braking). The mock test checks the closed form against both discrete trees. `p = (v - 8)/b` is the braking-prefix duration of the policy as run: it brakes until the ego speed is below 8 m/s and then holds that speed. Reason: stopping (or nearly stopping) in the middle of the steered lane change leaves residual yaw (the lane_follow terminal test fails) and the time-parametrised quintic tracker overshoots the road edge at low speed, so the change is completed at >= 8 m/s. The sweep tables therefore give two analytic columns: the policy as run, and the supremum over prefixes (continuous braking). The latter is '-' for D = 20 at v = 14: v tau_eff + v^2/(2 b_cal) = 19.98 m < 20 m, so under continuous braking the ego stops just short of the plane, inside the 1 m reserve; the arrival time is infinite and no finite supremum exists. That is a stop that violates the reserve, not a valid common stop (the common-stop boundary is D >= 20.98 m).
 
-**Analytic anchors.** b_cal = 6.211 m/s^2, tau_eff = 0.3 s (0.25 s configured, quantised to 5 ticks, + 0.05 s onset), T_lat = 1.388 s (quintic, lc_time 2, to a lateral displacement of 2.9 m = hw_ego + hw_hid + reserve of the 3.5 m lane width). Cross-check tolerance 0.25 s was declared in the script header.
+**Analytic anchors.** b_cal = 6.211 m/s^2, tau_eff = 0.3 s (0.25 s configured, quantised to 5 ticks, + 0.05 s onset), T_lat = 1.388 s (quintic, lc_time 2, to a lateral displacement of 2.9 m = hw_ego + hw_hid + reserve of the 3.5 m lane width). tau_plan = 0 and a time reserve of 0 are used in t_obs* (the 1 m spatial reserve is folded into the 2.9 m lateral criterion; the reveal is delivered on the same tick). The 0.25 s cross-check tolerance is declared in this script's header docstring; commit history cannot verify that it was set before the run, and the reader should take that as stated, not proven.
 
 **Plant caveats.** `hid` is static and re-placed from the measured ego bumper, so the declared gap D is exact; the ego starts on its declared speed (measured t0 speeds are in the audit traces below). No moving non-ego actor exists in these scenes, so the warm-up speed shortfall of moving actors (3-5 % low) does not apply. CARLA's brake model locks the wheels at the end of a stop (see Task 6); it only affects a_comb, which is not used here. The branch policy's braking is the calibrated decel target 6.19 m/s^2 (b_cal 6.211).
 
 ## Observation contract on CARLA
 
-Same policy (`spy`, full brake) in both worlds, D = 19, v = 14, t_reveal = 0.6: 12 pre-reveal frames per world; objs / lane_w / t_capture / ego_hl identical in all of them and objs empty: **True**; max |ego speed difference| between the worlds before the reveal 0.0000 m/s (CARLA is not bit-reproducible, and the ego trajectory is identical only up to that); at the reveal tick the delivered objects are [{'dx': 15.06390380859375, 'dlat': -3.49965763092041, 'dv': -12.439548928543635, 'hl': 1.852684736251831, 'hw': 0.8943392634391785}] (hid_left_lane) vs [{'dx': 15.06390380859375, 'dlat': 0.00034236907958984375, 'dv': -12.439548928543635, 'hl': 1.852684736251831, 'hw': 0.8943392634391785}] (hid_own_lane): separated True. The mock unit tests assert the same with exact equality of the whole Obs sequence and run the leakage check (no id / name / colour / blueprint / world name / absolute coordinate of the hidden vehicle in policy inputs before the reveal).
+Same policy (`spy`, full brake) in both worlds, D = 19, v = 14, t_reveal = 0.6: 12 pre-reveal frames per world; objs / lane_w / t_capture / ego_hl identical in all of them and objs empty: **True**; t_available also compared; max |ego speed difference| between the worlds before the reveal 0.00e+00 m/s, threshold 1e-06: **PASS**; at the reveal tick the delivered objects are [{'dx': 15.06390380859375, 'dlat': -3.49965763092041, 'dv': -12.439548928543635, 'hl': 1.852684736251831, 'hw': 0.8943392634391785}] (hid_left_lane) vs [{'dx': 15.06390380859375, 'dlat': 0.00034236907958984375, 'dv': -12.439548928543635, 'hl': 1.852684736251831, 'hw': 0.8943392634391785}] (hid_own_lane): separated True. The mock unit tests assert the same with exact equality of the whole Obs sequence and run the leakage check (no id / name / colour / blueprint / world name / absolute coordinate of the hidden vehicle in policy inputs before the reveal).
 
 ## Reveal-time sweep (RC10 -> RC11)
 
@@ -20,8 +20,8 @@ Evidence class per reveal time (R = R_REF, I = U_INFORMATION, L = U_LIBRARY, ? =
 
 v = 14 m/s, D_stop+c (analytic, b_cal, tau_eff) = 20.98 m
 
-| D | 0 | 0.1 | 0.2 | 0.3 | 0.4 | 0.5 | 0.6 | 0.7 | 0.8 | 0.9 | 1 | 1.1 | 1.2 | measured bracket | analytic t_obs* | midpoint - t* | within 0.25 s |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| D | 0 | 0.1 | 0.2 | 0.3 | 0.4 | 0.5 | 0.6 | 0.7 | 0.8 | 0.9 | 1 | 1.1 | 1.2 | measured bracket | analytic t* (policy as run) | analytic t* (sup over prefixes) | midpoint - t* | within 0.25 s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 17 | L |  |  |  |  |  | L |  |  |  |  |  | L | - | -0.150 | -0.113 | - | no transition inside the sweep |
 | 18 | R | I | I | I | I | I | I | I | I | I | I | I | I | (0.0, 0.1) | -0.025 | 0.068 | +0.075 | True |
 | 19 | R | R | I | I | I | I | I | I | I | I | I | I | I | (0.1, 0.2) | 0.100 | 0.305 | +0.050 | True |
@@ -32,11 +32,17 @@ v = 14 m/s, D_stop+c (analytic, b_cal, tau_eff) = 20.98 m
 
 v = 18 m/s, D_stop+c (analytic, b_cal, tau_eff) = 32.48 m
 
-| D | 0 | 0.2 | 0.4 | 0.6 | 0.8 | 1 | 1.2 | measured bracket | analytic t_obs* | midpoint - t* | within 0.25 s |
-|---|---|---|---|---|---|---|---|---|---|---|---|
+| D | 0 | 0.2 | 0.4 | 0.6 | 0.8 | 1 | 1.2 | measured bracket | analytic t* (policy as run) | analytic t* (sup over prefixes) | midpoint - t* | within 0.25 s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | 26 | R | R | I | I | I | I | I | (0.2, 0.4) | 0.182 | 0.182 | +0.118 | True |
 | 28 | R | R | R | I | I | I | I | (0.4, 0.6) | 0.431 | 0.452 | +0.069 | True |
 | 30 | R | R | R | R | R | I | I | (0.8, 1.0) | 0.681 | 0.820 | +0.219 | True |
+
+**Cross-check reading.** All 6 bracket midpoints differ from the policy-matched analytic t* by +0.075, +0.050, +0.125, +0.118, +0.069, +0.219 s: all positive, mean +0.109 s, max +0.219 s.  In 4 of 6 the analytic value lies strictly before the bracket's lower edge (i.e. earlier than the last R_REF reveal), so the analytic value is a conservative one-sided bound with a bias of about one to two reveal-grid steps, not a close match.  The bias comes from the criterion: it demands 2.9 m of lateral displacement at the plane, but the audited run clears the hidden vehicle with G >= 0 at 2.36 m of displacement (box-corner geometry; the corner distance, not the centre offset, sets the clearance).
+
+**Run-to-run spread.** `fixed_left` ignores observations, so its own-world G should not depend on the reveal time; its range over the sweep (min, max) is v14 D18: (0.025, 0.025); v14 D19: (0.081, 0.081); v14 D20: (0.065, 0.093); v14 D21: (0.086, 0.093); v18 D26: (0.092, 0.092); v18 D28: (0.135, 0.136); v18 D30: (0.143, 0.143). The brackets therefore carry about one reveal-grid step (0.1 s, 0.2 s at v = 18) of noise in addition to the 0.1 s resolution.
+
+**Note on case ids.** The records carry case_id RC10 for t_reveal <= 0.5 s and RC11 otherwise (assigned by reveal time before the run). It is a bookkeeping name, not a verdict: the evidence class is the label.
 
 Full margins (G, `hid_left_lane/hid_own_lane`) per record:
 
@@ -137,28 +143,28 @@ Full margins (G, `hid_left_lane/hid_own_lane`) per record:
 
 ## RC14: current-view aliasing resolved by past observations
 
-Scene v 14, D 19. Both worlds show `hid` from t = 0 and occlude it again from `t_forget`; they differ only in where it was seen (left lane vs own lane). After `t_forget` the delivered current frame is identical (no objects); the earlier frames differ, and so do the margin profiles. Library adds `branch_current_frame_only` (decides from the current frame alone, forgets the vehicle when it is occluded). G cells read `seen_left_then_occluded/seen_own_then_occluded`.
+Scene v 14, D 19. Both worlds show `hid` from t = 0 and occlude it again from `t_forget`; they differ only in where it was seen (left lane vs own lane). After `t_forget` the delivered current frame is identical (no objects) while the earlier frames differ. `t_forget` is the sweep parameter (the time since the last observation at decision time t is t - t_forget; there is no separate field). Library adds `branch_current_frame_only` (decides from the current frame alone, forgets the vehicle when it is occluded). G cells read `seen_left_then_occluded/seen_own_then_occluded`.
 
-| t_forget | evidence | margins | profiles differ | memory policy G >= eps in both | current-frame-only policy refuted |
-|---|---|---|---|---|---|
-| 0.3 | R_REF | stop_in_place=0.105/-inf; fixed_left=-inf/0.081; fixed_right=0.105/-inf; shared_slowdown_then_branch=0.105/0.081; branch_current_frame_only=0.105/-inf | True | True | True |
-| 0.6 | R_REF | stop_in_place=0.105/-inf; fixed_left=-inf/0.081; fixed_right=0.105/-inf; shared_slowdown_then_branch=0.105/0.081; branch_current_frame_only=0.105/-inf | True | True | True |
-| 1 | R_REF | stop_in_place=0.105/-inf; fixed_left=-inf/0.081; fixed_right=0.105/-inf; shared_slowdown_then_branch=0.105/0.081; branch_current_frame_only=0.105/-inf | True | True | True |
+| t_forget | evidence | margins | memory policy G >= eps in both worlds | current-frame-only policy refuted in one world |
+|---|---|---|---|---|
+| 0.3 | R_REF | stop_in_place=0.105/-inf; fixed_left=-inf/0.081; fixed_right=0.105/-inf; shared_slowdown_then_branch=0.105/0.081; branch_current_frame_only=0.105/-inf | True | True |
+| 0.6 | R_REF | stop_in_place=0.105/-inf; fixed_left=-inf/0.081; fixed_right=0.105/-inf; shared_slowdown_then_branch=0.105/0.081; branch_current_frame_only=0.105/-inf | True | True |
+| 1 | R_REF | stop_in_place=0.105/-inf; fixed_left=-inf/0.081; fixed_right=0.105/-inf; shared_slowdown_then_branch=0.105/0.081; branch_current_frame_only=0.105/-inf | True | True |
 
 ## Audited transition traces
 
 Scene v 14, D 19 (median of the fine-sweep scenes with a transition); the full library was re-run with a per-tick spy at the last R_REF reveal and the first non-R_REF reveal.
 
-**last_R_REF: t_reveal 0.1 s**, evidence R_REF, margins stop_in_place=0.105/-inf; fixed_left=-inf/0.081; fixed_right=0.105/-inf; shared_slowdown_then_branch=0.105/0.049; re-run vs scan max |dG| = 0.0.
+**last_R_REF: t_reveal 0.1 s**, evidence R_REF, margins stop_in_place=0.105/-inf; fixed_left=-inf/0.081; fixed_right=0.105/-inf; shared_slowdown_then_branch=0.105/0.049; re-run vs scan max |dG| = 0.0014052177709720642.
 
 - `branch_own`:
-    - run `shared_slowdown_then_branch/hid_own_lane`: termination horizon, contact events none, G (re-run) 0.049
-    - ego v 14.01 -> 6.72 m/s; lateral range [-3.84, -0.00] m, end -3.50; x_end 85.6; max per-tick lateral step 0.140 m = 0.443 x (v*dt) (continuous, no teleport)
+    - run `shared_slowdown_then_branch/hid_own_lane`: termination horizon, contact events none, G (re-run) 0.050
+    - ego v 14.01 -> 6.71 m/s; lateral range [-3.85, -0.00] m, end -3.50; x_end 85.5; max per-tick lateral step 0.140 m = 0.446 x (v*dt) (continuous, no teleport)
     - min clearance to each actor (m): {'hid': 1.25}
-    - dynamic peaks: {'a_lat': 4.521, 'a_long_smoothed': 6.303, 'a_comb': 7.399, 'a_comb_unmasked': 7.399, 'peak_times': {'a_long': {'t': 0.7, 'v': 11.802}, 'a_comb': {'t': 1.05, 'v': 9.676}, 'a_comb_unmasked': {'t': 1.05, 'v': 9.676}}, 'dyn_margin': {'a_lat': 0.435}}
+    - dynamic peaks: {'a_lat': 4.442, 'a_long_smoothed': 6.297, 'a_comb': 7.398, 'a_comb_unmasked': 7.398, 'peak_times': {'a_long': {'t': 0.65, 'v': 12.113}, 'a_comb': {'t': 1.05, 'v': 9.662}, 'a_comb_unmasked': {'t': 1.05, 'v': 9.662}}, 'dyn_margin': {'a_lat': 0.445}}
     - commands (decision_t -> effective_t): brake/None 0.00->0.25, brake/-3.5 0.10->0.35, keep/-3.5 1.35->1.60
-    - actor `hid`: v -0.00 -> 0.00, lat_end 0.00, closest |dx| to ego 0.1 m
-    - arrival at the hidden vehicle's rear plane: t 1.80 s, ego speed 6.11 m/s, lateral displacement 2.36 m (needed 2.9 m for the reserve), lateral distance to the vehicle centre 2.36 m
+    - actor `hid`: v -0.00 -> 0.00, lat_end 0.00, closest |dx| to ego 0.2 m
+    - arrival at the hidden vehicle's rear plane: t 1.80 s, ego speed 6.10 m/s, lateral displacement 2.36 m (needed 2.9 m for the reserve), lateral distance to the vehicle centre 2.36 m
 - `branch_left`:
     - run `shared_slowdown_then_branch/hid_left_lane`: termination horizon, contact events none, G (re-run) 0.105
     - ego v 14.01 -> -0.00 m/s; lateral range [-0.00, 0.00] m, end -0.00; x_end 17.0; max per-tick lateral step 0.000 m = 0.001 x (v*dt) (continuous, no teleport)
@@ -219,7 +225,7 @@ Scene v 14, D 19 (median of the fine-sweep scenes with a transition); the full l
     - actor `hid`: v -0.00 -> 0.26, lat_end 0.00, closest |dx| to ego 4.2 m
     - arrival at the hidden vehicle's rear plane: t 1.70 s, ego speed 6.11 m/s, lateral displacement 0.00 m (needed 2.9 m for the reserve), lateral distance to the vehicle centre 0.00 m
 
-Analytic arrival under continuous braking (b_cal, tau_eff): t 1.99 s at 3.49 m/s; measured for `shared_slowdown_then_branch` in `hid_own_lane` at the last R_REF reveal: t 1.80 s at 6.11 m/s.
+Analytic arrival under continuous braking (b_cal, tau_eff): t 1.99 s at 3.49 m/s; measured for `shared_slowdown_then_branch` in `hid_own_lane` at the last R_REF reveal: t 1.80 s at 6.10 m/s.
 
 ## Record validation
 

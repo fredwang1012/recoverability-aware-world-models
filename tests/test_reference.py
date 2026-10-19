@@ -82,3 +82,11 @@ def test_info_tree_reveal_threshold_is_analytic():
 def test_info_tree_physically_impossible_is_not_information_infeasible():
     assert T.label_scene(10.0, 0.0)["evidence"] == U_LIBRARY               # no world has a witness
     assert T.label_scene(40.0, 5.0)["evidence"] == R_REF                   # a common stop succeeds regardless of reveal time
+
+
+def test_t_obs_star_prefix_argument_and_common_stop():
+    D, v, tau, b, T_LAT = 19.0, 14.0, 0.3, 6.211, 1.3875
+    t_sup = T.t_obs_star(D, v, tau, b, T_LAT)
+    t_p = T.t_obs_star(D, v, tau, b, T_LAT, p=(v - 8.0) / b)
+    assert t_p < t_sup                                     # a shorter prefix arrives earlier, so the gate closes earlier
+    assert T.t_obs_star(20.0, v, tau, b, T_LAT) is None      # braking reaches a stop before the plane: no finite supremum

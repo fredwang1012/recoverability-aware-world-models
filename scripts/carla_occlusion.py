@@ -47,6 +47,7 @@ CFG = M.DEFAULT_V2
 TAU = 0.25
 B_CAL, TAU_EFF = CC.B_CAL, CC.TAU_EFF
 TOL_S = 0.25
+DV_TOL = 1e-6          # m/s: pre-reveal ego-speed difference between the two worlds that still counts as the same history
 TAG = "al8lc2"
 SCOPE = "carla_finite_replay"
 gval, fm, mw = CC.gval, CCP.fm, CCP.mw
@@ -88,6 +89,16 @@ def analytic_threshold(D, v, b=B_CAL, tau=TAU_EFF, lc_time=OC.LC_TIME, continuou
     if D >= stop_distance(v, b, tau):
         return None
     return IT.t_obs_star(D, v, tau, b, t_lat(lc_time), p=None if continuous else (v - V_FLOOR) / b)
+
+
+def best_value(r):
+    """V = max over policies of (min over worlds of G) from a record dict (-inf allowed; None entries make that policy unresolved and are skipped)."""
+    vals = []
+    for row in mw(r).values():
+        if any(g is None for g in row):
+            continue
+        vals.append(min(row))
+    return max(vals) if vals else -math.inf
 
 
 def own_world_G(r, policy="shared_slowdown_then_branch"):
@@ -143,8 +154,8 @@ class SpyPolicy(P.BrakeHold):
 
 
 def history_check(factory, theta, t_reveal):
-    """Run the SAME policy in both worlds and compare what it was handed: Obs equal field by field except the ego speed (CARLA is not bit
-    reproducible), objs / lane_w / t_capture / ego_hl exactly equal before the reveal; separated at the reveal."""
+    """Run the SAME policy in both worlds and compare what it was handed before the reveal: objs / lane_w / t_capture / t_available / ego_hl
+    exactly equal; the ego speed is compared separately against DV_TOL (pass/fail); separated at the reveal."""
     ws = OC.worlds(t_reveal, theta)
     hs = []
     for w in ws:
@@ -158,11 +169,12 @@ def history_check(factory, theta, t_reveal):
     n = min(len(hs[0]), len(hs[1]))
     pre = [i for i in range(n) if hs[0][i][0] < t_reveal - 1e-9]
     same = all(hs[0][i][1][-1].objs == hs[1][i][1][-1].objs == [] and hs[0][i][1][-1].lane_w == hs[1][i][1][-1].lane_w
-               and hs[0][i][1][-1].t_capture == hs[1][i][1][-1].t_capture and hs[0][i][1][-1].ego_hl == hs[1][i][1][-1].ego_hl for i in pre)
+               and hs[0][i][1][-1].t_capture == hs[1][i][1][-1].t_capture and hs[0][i][1][-1].t_available == hs[1][i][1][-1].t_available
+               and hs[0][i][1][-1].ego_hl == hs[1][i][1][-1].ego_hl for i in pre)
     dv = max(abs(hs[0][i][1][-1].v - hs[1][i][1][-1].v) for i in pre)
     k = [i for i in range(n) if abs(hs[0][i][0] - t_reveal) < 1e-9][0]
     ob = [hs[j][k][1][-1].objs for j in (0, 1)]
-    return {"n_pre": len(pre), "identical_objs_etc": same, "max_dv_pre": dv, "objs_at_reveal": ob,
+    return {"n_pre": len(pre), "identical_objs_etc": same, "max_dv_pre": dv, "dv_ok": bool(dv < DV_TOL), "objs_at_reveal": ob,
             "separated": ob[0] != ob[1] and len(ob[0]) == len(ob[1]) == 1}
 
 
@@ -266,27 +278,34 @@ def figure(sweeps, path):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     ks = [k for k in sorted(sweeps) if k[0] == 14.0]
-    fig, (a, b) = plt.subplots(1, 2, figsize=(12.5, 4.8), gridspec_kw={"width_ratios": [1.5, 1]})
+    fig, (a, b) = plt.subplots(1, 2, figsize=(12.5, 5.8), gridspec_kw={"width_ratios": [1.5, 1]})
     cmap = {"R_REF": "#2a9d8f", "U_INFORMATION": "#e76f51", "U_LIBRARY": "#6c757d", "UNRESOLVED": "#bbbbbb", "INVALID_RUN": "k"}
-    for i, k in enumerate(ks):
+    Dcol = {k: c for k, c in zip(ks, ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#8c564b", "#17becf", "#7f7f7f"])}
+    lo, hi = -0.3, 0.3
+    for k in ks:
         recs = sweeps[k]
         ts = sorted(recs)
-        y = [(-1.2 if gval(own_world_G(recs[t])) in (None, -math.inf) else max(-1.0, min(1.0, gval(own_world_G(recs[t]))))) for t in ts]
-        a.plot(ts, y, "-", color="#cfcfcf", lw=1, zorder=1)
-        a.scatter(ts, y, c=[cmap[recs[t]["evidence_class"]] for t in ts], s=38, zorder=3, edgecolor="k", linewidth=0.4)
+        V = [best_value(recs[t]) for t in ts]
+        fin = [(t, max(lo, min(hi, v))) for t, v in zip(ts, V) if v != -math.inf]
+        inf_t = [t for t, v in zip(ts, V) if v == -math.inf]
+        a.plot([t for t, _ in fin], [y for _, y in fin], "-", color=Dcol[k], lw=1.2, alpha=0.8)
+        for t, v in zip(ts, V):
+            ok = recs[t]["evidence_class"] == "R_REF"
+            a.scatter([t], [lo if v == -math.inf else max(lo, min(hi, v))], marker="v" if v == -math.inf else "o", s=42, zorder=3,
+                      facecolor=Dcol[k] if ok else "white", edgecolor=Dcol[k], linewidth=1.4)
         ts_star = analytic_threshold(k[1], k[0])
-        if ts_star is not None:
-            a.axvline(ts_star, color="#264653", ls=(0, (3, 3)), lw=1)
-            a.text(ts_star + 0.01, 0.92 - 0.1 * i, f"D={k[1]:g}: t*={ts_star:.2f}", fontsize=8, color="#264653")
-        else:
-            a.text(0.02, 0.92 - 0.1 * i, f"D={k[1]:g}: common stop (no t*)", fontsize=8, color="#264653")
+        a.axvline(ts_star if ts_star is not None else np.nan, color=Dcol[k], ls=(0, (3, 3)), lw=1)
+        a.plot([], [], color=Dcol[k], lw=1.5, label=f"D={k[1]:g} m: " + (f"t*={ts_star:.2f} s (dashed)" if ts_star is not None else "common stop, no t*"))
     a.axhline(0, color="k", lw=0.6)
+    a.set_ylim(lo - 0.04, hi + 0.04)
     a.set_xlabel("t_reveal (s)")
-    a.set_ylabel("G of shared_slowdown_then_branch, world hid_own_lane\n(-inf plotted at -1.2, clipped to +-1)")
-    a.set_title("v = 14 m/s: branch margin vs reveal time (dashed = analytic t_obs*)")
-    for e, c in cmap.items():
-        a.scatter([], [], c=c, edgecolor="k", linewidth=0.4, label=e)
-    a.legend(fontsize=7, loc="lower left")
+    a.set_ylabel("V = max over policies of min over worlds of G\n(clipped to [-0.3, 0.3])")
+    a.set_title("v = 14 m/s: best causal margin V vs reveal time", fontsize=10)
+    a.scatter([], [], marker="o", facecolor="k", edgecolor="k", label="filled = R_REF")
+    a.scatter([], [], marker="o", facecolor="white", edgecolor="k", label="hollow = U_INFORMATION / U_LIBRARY")
+    a.scatter([], [], marker="v", facecolor="white", edgecolor="k", label="triangle at floor = V = -inf")
+    a.set_xlim(-0.05, 1.25)
+    a.legend(fontsize=7, loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2, framealpha=0.9)
     ds = [k for k in ks]
     allt = sorted({t for k in ks for t in sweeps[k]})
     img = np.full((len(ds), len(allt)), np.nan)
@@ -303,11 +322,44 @@ def figure(sweeps, path):
     b.set_xlabel("t_reveal (s)")
     b.set_title("evidence class (white = not run)")
     fig.tight_layout()
-    fig.savefig(path, dpi=140)
+    fig.savefig(path, dpi=140, bbox_inches="tight")
     plt.close(fig)
 
 
 # ----------------------------------------------------------------------------- report
+def sweep_table(ks, sweeps, times):
+    """Markdown lines of one sweep table; every row has exactly as many cells as the header."""
+    hdr = ["D"] + [f"{t:g}" for t in times] + ["measured bracket", "analytic t* (policy as run)", "analytic t* (sup over prefixes)", "midpoint - t*", "within 0.25 s"]
+    out = ["| " + " | ".join(hdr) + " |", "|" + "---|" * len(hdr)]
+    for k in ks:
+        tr = transition(sweeps[k])
+        ts = analytic_threshold(k[1], k[0])
+        tsup = analytic_threshold(k[1], k[0], continuous=True)
+        cc = crosscheck(tr, ts)
+        cells = [code(sweeps[k][t]) if t in sweeps[k] else "" for t in times]
+        row = [f"{k[1]:g}"] + cells + [str(tr) if tr else "-", "none (common stop)" if ts is None else f"{ts:.3f}", "-" if tsup is None else f"{tsup:.3f}",
+                                       "-" if cc["diff"] is None else f"{cc['diff']:+.3f}", str(cc["ok"]) if cc["ok"] is not None else cc["note"]]
+        out.append("| " + " | ".join(row) + " |")
+    return out
+
+
+def crosscheck_stats(sweeps, keys):
+    """Differences (midpoint - t*) of the scenes with a bracket and a finite t*, and how many have t* strictly before the bracket's lower edge."""
+    rows = []
+    for k in keys:
+        tr, ts = transition(sweeps[k]), analytic_threshold(k[1], k[0])
+        if tr and ts is not None:
+            rows.append((k, 0.5 * (tr[0] + tr[1]) - ts, ts < tr[0]))
+    return rows
+
+
+def blind_spread(sweeps, k):
+    """Range of the blind fixed_left policy's own-world G over the reveal sweep (it ignores observations, so this is run-to-run spread)."""
+    g = [gval(mw(r)["fixed_left"][1]) for r in sweeps[k].values()]
+    g = [x for x in g if x is not None and x != -math.inf]
+    return (min(g), max(g)) if g else None
+
+
 def code(r):
     return {"R_REF": "R", "U_INFORMATION": "I", "U_LIBRARY": "L", "UNRESOLVED": "?", "INVALID_RUN": "X"}.get(r["evidence_class"], "?")
 
@@ -342,17 +394,23 @@ def report(ctx, sweeps, rc14, aud, hist, fig_path):
     w("**info_tree reconciliation.** `reference/info_tree.py` has two LATERAL corridors that both need T_lat. On the two-lane site the right corridor is the ego's own lane and needs no lateral move, so the matrix is "
       "`build_matrix_two_lane` (added): world A/hid_left_lane has stop/stay/observe succeed (+1) and blind_L fail; world B/hid_own_lane has the same lateral slack expression as before. "
       "The binding constraint is the lateral world, so the analytic threshold is unchanged and is also given in closed form, `t_obs_star = t_arr_max - tau - T_lat` (t_arr_max = arrival time under continuous braking, since the branch keeps braking). "
-      "The mock test checks the closed form against both discrete trees.\n")
+      "The mock test checks the closed form against both discrete trees. "
+      f"`p = (v - {V_FLOOR:g})/b` is the braking-prefix duration of the policy as run: it brakes until the ego speed is below {V_FLOOR:g} m/s and then holds that speed. Reason: stopping (or nearly stopping) in the middle of the steered "
+      "lane change leaves residual yaw (the lane_follow terminal test fails) and the time-parametrised quintic tracker overshoots the road edge at low speed, so the change is completed at >= 8 m/s. "
+      "The sweep tables therefore give two analytic columns: the policy as run, and the supremum over prefixes (continuous braking). The latter is '-' for D = 20 at v = 14: v tau_eff + v^2/(2 b_cal) = 19.98 m < 20 m, so under continuous braking the ego "
+      "stops just short of the plane, inside the 1 m reserve; the arrival time is infinite and no finite supremum exists. That is a stop that violates the reserve, not a valid common stop (the common-stop boundary is D >= 20.98 m)."
+      "\n")
     lt = t_lat()
     w(f"**Analytic anchors.** b_cal = {B_CAL} m/s^2, tau_eff = {TAU_EFF} s (0.25 s configured, quantised to 5 ticks, + 0.05 s onset), T_lat = {lt:.3f} s (quintic, lc_time {OC.LC_TIME:g}, to a lateral displacement of "
-      f"{OC.EGO_HW + OC.HID_HW + CFG.reserve_m:.1f} m = hw_ego + hw_hid + reserve of the 3.5 m lane width). Cross-check tolerance {TOL_S} s was declared in the script header.\n")
+      f"{OC.EGO_HW + OC.HID_HW + CFG.reserve_m:.1f} m = hw_ego + hw_hid + reserve of the 3.5 m lane width). tau_plan = 0 and a time reserve of 0 are used in t_obs* (the 1 m spatial reserve is folded into the 2.9 m lateral criterion; the reveal is delivered on the same tick). "
+      f"The {TOL_S} s cross-check tolerance is declared in this script's header docstring; commit history cannot verify that it was set before the run, and the reader should take that as stated, not proven.\n")
     w("**Plant caveats.** `hid` is static and re-placed from the measured ego bumper, so the declared gap D is exact; the ego starts on its declared speed (measured t0 speeds are in the audit traces below). "
       "No moving non-ego actor exists in these scenes, so the warm-up speed shortfall of moving actors (3-5 % low) does not apply. CARLA's brake model locks the wheels at the end of a stop (see Task 6); it only affects a_comb, which is not used here. "
       "The branch policy's braking is the calibrated decel target 6.19 m/s^2 (b_cal 6.211).\n")
     # ---- observation contract
     w("## Observation contract on CARLA\n")
     w(f"Same policy (`spy`, full brake) in both worlds, D = {hist['D']:g}, v = {hist['v']:g}, t_reveal = {hist['t']:g}: {hist['n_pre']} pre-reveal frames per world; objs / lane_w / t_capture / ego_hl identical in all of them "
-      f"and objs empty: **{hist['identical_objs_etc']}**; max |ego speed difference| between the worlds before the reveal {hist['max_dv_pre']:.4f} m/s (CARLA is not bit-reproducible, and the ego trajectory is identical only up to that); "
+      f"and objs empty: **{hist['identical_objs_etc']}**; t_available also compared; max |ego speed difference| between the worlds before the reveal {hist['max_dv_pre']:.2e} m/s, threshold {DV_TOL:g}: **{'PASS' if hist['dv_ok'] else 'FAIL'}**; "
       f"at the reveal tick the delivered objects are {hist['objs_at_reveal'][0]} (hid_left_lane) vs {hist['objs_at_reveal'][1]} (hid_own_lane): separated {hist['separated']}. "
       "The mock unit tests assert the same with exact equality of the whole Obs sequence and run the leakage check (no id / name / colour / blueprint / world name / absolute coordinate of the hidden vehicle in policy inputs before the reveal).\n")
     # ---- sweep tables
@@ -362,16 +420,20 @@ def report(ctx, sweeps, rc14, aud, hist, fig_path):
         ks = [k for k in sorted(sweeps) if k[0] == v]
         times = sorted({t for k in ks for t in sweeps[k]})
         w(f"v = {v:g} m/s, D_stop+c (analytic, b_cal, tau_eff) = {v * TAU_EFF + v * v / (2 * B_CAL) + CFG.reserve_m:.2f} m\n")
-        w("| D | " + " | ".join(f"{t:g}" for t in times) + " | measured bracket | analytic t_obs* | midpoint - t* | within 0.25 s |\n|---|" + "---|" * (len(times) + 4))
-        for k in ks:
-            tr = transition(sweeps[k])
-            ts = analytic_threshold(k[1], k[0])
-            cc = crosscheck(tr, ts)
-            cells = [code(sweeps[k][t]) if t in sweeps[k] else "" for t in times]
-            tsup = analytic_threshold(k[1], k[0], continuous=True)
-            w(f"| {k[1]:g} | " + " | ".join(cells) + f" | {tr if tr else '-'} | {'none (common stop)' if ts is None else f'{ts:.3f}'} | {'-' if tsup is None else f'{tsup:.3f}'} | "
-              f"{'-' if cc['diff'] is None else f'{cc['diff']:+.3f}'} | {cc['ok'] if cc['ok'] is not None else cc['note']} |")
+        L.extend(sweep_table(ks, sweeps, times))
         w("")
+    rows_ = crosscheck_stats(sweeps, sorted(sweeps))
+    if rows_:
+        ds_ = [d for _, d, _ in rows_]
+        w(f"**Cross-check reading.** All {len(ds_)} bracket midpoints differ from the policy-matched analytic t* by {', '.join(f'{d:+.3f}' for d in ds_)} s: "
+          f"{'all positive' if all(d > 0 for d in ds_) else 'mixed sign'}, mean {sum(ds_) / len(ds_):+.3f} s, max {max(ds_):+.3f} s.  In {sum(e for _, _, e in rows_)} of {len(rows_)} the analytic value lies strictly before the bracket's lower edge "
+          "(i.e. earlier than the last R_REF reveal), so the analytic value is a conservative one-sided bound with a bias of about one to two reveal-grid steps, not a close match.  The bias comes from the criterion: it demands 2.9 m of lateral displacement at the plane, "
+          "but the audited run clears the hidden vehicle with G >= 0 at 2.36 m of displacement (box-corner geometry; the corner distance, not the centre offset, sets the clearance).\n")
+    sp_ = {f"v{k[0]:g} D{k[1]:g}": blind_spread(sweeps, k) for k in sorted(sweeps) if len(sweeps[k]) > 3}
+    w("**Run-to-run spread.** `fixed_left` ignores observations, so its own-world G should not depend on the reveal time; its range over the sweep (min, max) is "
+      + "; ".join(f"{n}: ({a:.3f}, {b:.3f})" for n, r in sp_.items() if r for a, b in [r]) + ". "
+      "The brackets therefore carry about one reveal-grid step (0.1 s, 0.2 s at v = 18) of noise in addition to the 0.1 s resolution.\n")
+    w("**Note on case ids.** The records carry case_id RC10 for t_reveal <= 0.5 s and RC11 otherwise (assigned by reveal time before the run). It is a bookkeeping name, not a verdict: the evidence class is the label.\n")
     w("Full margins (G, `hid_left_lane/hid_own_lane`) per record:\n")
     w("| v | D | t_reveal | evidence | margins |\n|---|---|---|---|---|")
     for k in sorted(sweeps):
@@ -399,13 +461,13 @@ def report(ctx, sweeps, rc14, aud, hist, fig_path):
     # ---- RC14
     w("## RC14: current-view aliasing resolved by past observations\n")
     w(f"Scene v {RC14_SCENE[0]:g}, D {RC14_SCENE[1]:g}. Both worlds show `hid` from t = 0 and occlude it again from `t_forget`; they differ only in where it was seen (left lane vs own lane). "
-      "After `t_forget` the delivered current frame is identical (no objects); the earlier frames differ, and so do the margin profiles. Library adds `branch_current_frame_only` (decides from the current frame alone, forgets the vehicle when it is occluded). "
+      "After `t_forget` the delivered current frame is identical (no objects) while the earlier frames differ. `t_forget` is the sweep parameter (the time since the last observation at decision time t is t - t_forget; there is no separate field). Library adds `branch_current_frame_only` (decides from the current frame alone, forgets the vehicle when it is occluded). "
       "G cells read `seen_left_then_occluded/seen_own_then_occluded`.\n")
-    w("| t_forget | evidence | margins | profiles differ | memory policy G >= eps in both | current-frame-only policy refuted |\n|---|---|---|---|---|---|")
+    w("| t_forget | evidence | margins | memory policy G >= eps in both worlds | current-frame-only policy refuted in one world |\n|---|---|---|---|---|")
     for tf, r in sorted(rc14.items()):
         m = mw(r)
         cols = [[m[p][j] for p in r["policies"]] for j in (0, 1)]
-        w(f"| {tf:g} | {r['evidence_class']} | {CCP.mrows(r)} | {cols[0] != cols[1]} | {CCP.all_ok(m['shared_slowdown_then_branch'])} | {CCP.any_bad(m['branch_current_frame_only'])} |")
+        w(f"| {tf:g} | {r['evidence_class']} | {CCP.mrows(r)} | {CCP.all_ok(m['shared_slowdown_then_branch'])} | {CCP.any_bad(m['branch_current_frame_only'])} |")
     w("")
     # ---- audits
     w("## Audited transition traces\n")
