@@ -36,7 +36,7 @@ OUT = "results/carla/compositional"
 CFG = M.DEFAULT_V2
 TAU = 0.25
 DECEL_TARGET = CC.DECEL_TARGET
-TAG = f"al{CP.A_LAT_MAX:g}c{CP.A_COMB_MAX:g}"
+TAG = f"al{CP.A_LAT_MAX:g}c{CP.A_COMB_MAX:g}v{CP.H.A_COMB_VMIN:g}"
 SCOPE = "carla_finite_replay"
 gval = CC.gval
 
@@ -163,38 +163,55 @@ class Ctx(CC.Ctx):
         return CP.run(case, self.factory, theta, CFG, "carla", SCOPE, physics_profile_id=self.pid, runtime=self.runtime, **kw)
 
 
-def audit(ctx, case, theta, policy_factory, world_name, **kw):
-    """Re-run ONE witness policy in ONE world with a per-tick spy (ego + other actors) and summarise it."""
-    log = []
-    fac = lambda: CC.SpyPlant(ctx.factory(), log)
-    worlds = kw.pop("worlds", None)
-    if worlds is not None:
-        worlds = [w for w in worlds if w["name"] == world_name]
-    rec = CP.run(case, fac, theta, CFG, "carla", SCOPE, library=[policy_factory], worlds=worlds, physics_profile_id=ctx.pid,
-                 runtime=ctx.runtime, **kw)
-    return summarize_trace(log, rec, 0.05)
+def audit_full(ctx, case, theta, **kw):
+    """Re-run the WHOLE library of the selected scene with a per-tick spy on every episode (same episode order as the scan, so the
+    re-run is comparable); returns (record, logs) with logs[policy_idx * n_worlds + world_idx]."""
+    logs = []
+
+    def fac():
+        lg = []
+        logs.append(lg)
+        return CC.SpyPlant(ctx.factory(), lg)
+    rec = CP.run(case, fac, theta, CFG, "carla", SCOPE, physics_profile_id=ctx.pid, runtime=ctx.runtime, **kw)
+    return rec, logs
 
 
-def summarize_trace(log, rec, dt):
+def trace_of(rec, logs, policy, world, dt=0.05):
+    pi, wi = rec.policies.index(policy), rec.worlds.index(world)
+    return summarize_trace(logs[pi * len(rec.worlds) + wi], rec, f"{policy}/{world}", rec.R_raw[pi][wi], dt)
+
+
+def rerun_diff(scan_rec, rec):
+    """Max |G_rerun - G_scan| over entries finite in both; 'pattern differs' if the -inf/None pattern differs."""
+    a = [gval(x) for row in scan_rec["R_raw"] for x in row]
+    b = [gval(x) for row in rec.R_raw for x in row]
+    d = 0.0
+    for x, y in zip(a, b):
+        if x is None or y is None or math.isinf(x) or math.isinf(y):
+            if x != y:
+                return "pattern differs"
+        else:
+            d = max(d, abs(x - y))
+    return d
+
+
+def summarize_trace(log, rec, key, g, dt):
     ego = [s["ego"] for s in log]
     lat, v = [e[1] for e in ego], [e[2] for e in ego]
     step = max((abs(lat[i + 1] - lat[i]) for i in range(len(lat) - 1)), default=0.0)
     step_ratio = max((abs(lat[i + 1] - lat[i]) / max(v[i] * dt, 1e-6) for i in range(len(lat) - 1) if v[i] > 2.0), default=0.0)
     out = {"n_ticks": len(log), "ego_v_start": v[0], "ego_v_end": v[-1], "ego_lat_min": min(lat), "ego_lat_max": max(lat), "ego_lat_end": lat[-1],
            "max_lat_step_m": step, "max_lat_step_over_v_dt": step_ratio, "x_end": ego[-1][0]}
-    names = [n for n in log[0] if n != "ego"]
     out["others"] = {}
-    for n in names:
+    for n in [n for n in log[0] if n != "ego"]:
         o = [s[n] for s in log]
         out["others"][n] = {"v_start": o[0][2], "v_end": o[-1][2], "lat_end": o[-1][1], "x_end": o[-1][0],
                             "min_abs_dx": min(abs(a[0] - b[0]) for a, b in zip(o, ego))}
-    key = next(iter(rec.traces))
     tr = rec.traces[key]
-    out.update({"run": key, "termination": rec.events[key]["termination"], "contact_events": rec.events[key]["events"],
-                "G": rec.R_raw[0][0], "min_clearance_m": {k: (None if (v2 is None or v2 == math.inf) else v2)
-                                                           for k, v2 in tr["margin"]["min_clearance_m"].items()},
+    out.update({"run": key, "termination": rec.events[key]["termination"], "contact_events": rec.events[key]["events"], "G": g,
+                "min_clearance_m": {k: (None if (x is None or x == math.inf) else float(x)) for k, x in tr["margin"]["min_clearance_m"].items()},
                 "dyn_peaks": tr["margin"].get("dyn_peaks"), "route_goal_completed": tr.get("route_goal_completed"),
-                "commands": rec.timestamps[key]["commands"], "evidence_class_single_policy": rec.evidence_class})
+                "commands": rec.timestamps[key]["commands"]})
     return out
 
 
@@ -204,16 +221,34 @@ def at_time(log, t, dt=0.05):
 
 
 # ----------------------------------------------------------------------------- sweeps
+RC04_PS_BASE, RC04_PS_EXT = (0.4, 0.8), (0.2, 0.4, 0.6, 0.8, 1.0)
+
+
+def stop_dist(v):
+    """Analytic braking envelope used ONLY to place the extended RC04 gap grid (b = 6.2 CARLA calibration, tau 0.3, reserve 1 m)."""
+    return v * v / (2 * 6.2) + 0.3 * v + CFG.reserve_m
+
+
 def run_rc04(ctx):
+    """Keys (lib, lc, v, g): 'base' = first grid (v 14/18, gap 18-38 step 2, ps 0.4/0.8), 'ext' = extended search added after the base grid
+    showed no contrast (v 16/18/20/22, gaps from stop_dist-10 to stop_dist step 2, ps 0.2-1.0)."""
     res = {}
     for lc in (1.6, 2.0):
         for v in (14.0, 18.0):
-            name = f"rc04_v{v:g}_lc{lc:g}_{TAG}"
             for g in range(18, 40, 2):
                 th = {"gap_m": float(g), "v_mps": v, "tau_s": TAU}
-                res[(lc, v, g)] = ctx.point(name, f"{g}", lambda th=th, lc=lc: ctx.run("RC04", th, library=CP.rc04_library(lc)),
-                                            library_id=f"rc04_lc{lc:g}_ps0.4-0.8_{TAG}")
-            print("RC04", lc, v, [g for (l, vv, g), r in res.items() if l == lc and vv == v and rc04_contrast(r)], flush=True)
+                res[("base", lc, v, g)] = ctx.point(f"rc04_v{v:g}_lc{lc:g}_{TAG}", f"{g}", lambda th=th, lc=lc: ctx.run("RC04", th, library=CP.rc04_library(lc)),
+                                                    library_id=f"rc04_lc{lc:g}_ps0.4-0.8_{TAG}")
+    for lc in (1.6, 2.0):
+        for v in (16.0, 18.0, 20.0, 22.0):
+            top = int(stop_dist(v))
+            for g in range(top - 10, top + 1, 2):
+                th = {"gap_m": float(g), "v_mps": v, "tau_s": TAU}
+                res[("ext", lc, v, g)] = ctx.point(f"rc04x_v{v:g}_lc{lc:g}_{TAG}", f"{g}",
+                                                   lambda th=th, lc=lc: ctx.run("RC04", th, library=CP.rc04_library(lc, RC04_PS_EXT)),
+                                                   library_id=f"rc04_lc{lc:g}_ps{'-'.join(map(str, RC04_PS_EXT))}_{TAG}")
+    for lib in ("base", "ext"):
+        print("RC04", lib, sorted((lc, v, g) for (l, lc, v, g), r in res.items() if l == lib and rc04_contrast(r)), flush=True)
     return res
 
 
@@ -286,39 +321,39 @@ def pick(scan, pred):
 
 def select_and_audit(ctx, r04, r05, r06, r15, r18):
     out = {}
-    # RC04: prefer lc 1.6, then 2.0; within the library pick the highest speed with a window, median gap
-    sel = None
-    for lc in (1.6, 2.0):
-        for v in (18.0, 14.0):
-            keys = [g for (l, vv, g), r in r04.items() if l == lc and vv == v and rc04_contrast(r)]
-            if keys:
-                sel = (lc, v, median_key(keys), keys)
-                break
-        if sel:
-            break
-    if sel:
-        lc, v, g, keys = sel
+    # RC04: highest speed with a window (ties: base before ext, lc 1.6 before 2.0), median gap of that window
+    wins = {}
+    for (lib, lc, v, g), r in r04.items():
+        if rc04_contrast(r):
+            wins.setdefault((v, lib == "base", lc == 1.6), []).append((lib, lc, v, g))
+    if wins:
+        keys = sorted(wins[max(wins)])
+        lib, lc, v, g = median_key(keys)
         th = {"gap_m": float(g), "v_mps": v, "tau_s": TAU}
-        r = r04[(lc, v, g)]
+        r = r04[(lib, lc, v, g)]
         stg = [k for k, gs in mw(r).items() if k.startswith("staged_brake") and all_ok(gs)][0]
-        fac = [f for f in CP.rc04_library(lc) if f().name == stg][0]
-        out["RC04"] = {"sel": (lc, v, g), "window": keys, "witness": stg, "record": r, "audit": audit(ctx, "RC04", th, fac, "static_blocker")}
+        rec, logs = audit_full(ctx, "RC04", th, library=CP.rc04_library(lc, RC04_PS_BASE if lib == "base" else RC04_PS_EXT))
+        out["RC04"] = {"sel": (lib, lc, v, g), "window": keys, "witness": stg, "record": r, "rerun": rerun_diff(r, rec),
+                       "audit": trace_of(rec, logs, stg, "static_blocker"), "audit_bh": trace_of(rec, logs, "brake_hold", "static_blocker"),
+                       "audit_imm": trace_of(rec, logs, "immediate_lane_change", "static_blocker")}
     else:
         out["RC04"] = None
     k5, keys5 = pick(r05, rc05_contrast)
     if k5:
         th = {"gap_m": k5[0], "v_mps": 14.0, "tau_s": TAU, "rear_gap_m": k5[1], "rear_v_mps": k5[2], "t_reveal_s": 1.25}
-        out["RC05"] = {"sel": k5, "window": keys5, "witness": "abort_and_stabilize", "record": r05[k5],
-                       "audit": {w["name"]: audit(ctx, "RC05", th, CP.rc05_library()[1], w["name"], worlds=CP.rc05_worlds(1.25)) for w in CP.rc05_worlds(1.25)},
-                       "audit_commit": audit(ctx, "RC05", th, CP.rc05_library()[0], "gap_closes", worlds=CP.rc05_worlds(1.25))}
+        rec, logs = audit_full(ctx, "RC05", th)
+        out["RC05"] = {"sel": k5, "window": keys5, "witness": "abort_and_stabilize", "record": r05[k5], "rerun": rerun_diff(r05[k5], rec),
+                       "audit": {wn: trace_of(rec, logs, "abort_and_stabilize", wn) for wn in rec.worlds},
+                       "audit_commit": trace_of(rec, logs, "commit_lane_change", "gap_closes")}
     else:
         out["RC05"] = None
     k6, keys6 = pick(r06, rc06_contrast)
     if k6:
         th = {"gap_m": k6[0], "v_mps": 10.0, "tau_s": TAU, "pass_gap_m": k6[1], "pass_v_mps": k6[2]}
-        out["RC06"] = {"sel": k6, "window": keys6, "witness": "wait_observe_enter", "record": r06[k6],
-                       "audit": audit(ctx, "RC06", th, CP.rc06_library()[1], "passer_cruise"),
-                       "audit_immediate": audit(ctx, "RC06", th, CP.rc06_library()[0], "passer_cruise")}
+        rec, logs = audit_full(ctx, "RC06", th)
+        out["RC06"] = {"sel": k6, "window": keys6, "witness": "wait_observe_enter", "record": r06[k6], "rerun": rerun_diff(r06[k6], rec),
+                       "audit": trace_of(rec, logs, "wait_observe_enter", "passer_cruise"),
+                       "audit_immediate": trace_of(rec, logs, "immediate_entry", "passer_cruise")}
     else:
         out["RC06"] = None
     strong = [k for k, r in r15.items() if rc15_contrast(r) == "strong"]
@@ -326,27 +361,28 @@ def select_and_audit(ctx, r04, r05, r06, r15, r18):
     k15 = median_key(strong) or median_key(weak)
     if k15:
         th = {"gap_m": k15[0], "v_mps": 10.0, "tau_s": TAU, "adj_gap_m": k15[1], "adj_v_mps": k15[2]}
-        lib = CP.rc15_library()
+        rec, logs = audit_full(ctx, "RC15", th)
         out["RC15"] = {"sel": k15, "kind": rc15_contrast(r15[k15]), "strong": strong, "weak": weak, "witness": "observe_yield_else_fallback",
-                       "record": r15[k15],
-                       "audit": {w["name"]: audit(ctx, "RC15", th, lib[1], w["name"], worlds=CP.rc15_worlds()) for w in CP.rc15_worlds()},
-                       "audit_always": {w["name"]: audit(ctx, "RC15", th, lib[0], w["name"], worlds=CP.rc15_worlds()) for w in CP.rc15_worlds()}}
+                       "record": r15[k15], "rerun": rerun_diff(r15[k15], rec),
+                       "audit": {wn: trace_of(rec, logs, "observe_yield_else_fallback", wn) for wn in rec.worlds},
+                       "audit_always": {wn: trace_of(rec, logs, "always_merge", wn) for wn in rec.worlds}}
     else:
         out["RC15"] = None
-    # RC18: scenes where >= 1 command is refuted only by the combined limit
     cand = [(v, g) for (v, g, c) in r18 if c and rc18_refuted_by_comb(r18[(v, g, False)], r18[(v, g, True)])]
     kc = median_key(cand)
     if kc:
         v, g = kc
         cmds = rc18_refuted_by_comb(r18[(v, g, False)], r18[(v, g, True)])
-        out["RC18"] = {"sel": kc, "window": cand, "cmds": cmds, "rec_nocomb": r18[(v, g, False)], "rec_comb": r18[(v, g, True)]}
         feas = [p for p, gs in mw(r18[(v, g, True)]).items() if all_ok(gs)]
-        out["RC18"]["feasible_alternatives"] = feas
+        out["RC18"] = {"sel": kc, "window": cand, "cmds": cmds, "rec_nocomb": r18[(v, g, False)], "rec_comb": r18[(v, g, True)],
+                       "feasible_alternatives": feas}
+        th = {"gap_m": float(g), "v_mps": v, "tau_s": TAU}
+        rec, logs = audit_full(ctx, "RC18", th, library=CP.rc18_library(RC18_LCS, 2.0), spec=CP.rc18_spec(th, CFG, comb=True))
+        out["RC18"]["rerun"] = rerun_diff(r18[(v, g, True)], rec)
+        out["RC18"]["audit_cmd"] = trace_of(rec, logs, cmds[0], "static_blocker")
         if feas:
-            th = {"gap_m": float(g), "v_mps": v, "tau_s": TAU}
-            f = [x for x in CP.rc18_library(RC18_LCS, 2.0) if x().name == feas[0]][0]
-            out["RC18"]["audit"] = audit(ctx, "RC18", th, f, "static_blocker", spec=CP.rc18_spec(th, CFG, comb=True))
             out["RC18"]["witness"] = feas[0]
+            out["RC18"]["audit"] = trace_of(rec, logs, feas[0], "static_blocker")
     else:
         out["RC18"] = None
     return out
@@ -358,8 +394,7 @@ def ev_row(r):
 
 
 def trace_lines(a, indent="  "):
-    L = [f"{indent}- run `{a['run']}`: termination {a['termination']}, contact events {a['contact_events'] or 'none'}, G {fm(gval(a['G']))}, "
-         f"evidence (single-policy re-run) {a['evidence_class_single_policy']}",
+    L = [f"{indent}- run `{a['run']}`: termination {a['termination']}, contact events {a['contact_events'] or 'none'}, G (re-run) {fm(gval(a['G']))}",
          f"{indent}- ego v {a['ego_v_start']:.2f} -> {a['ego_v_end']:.2f} m/s; lateral range [{a['ego_lat_min']:.2f}, {a['ego_lat_max']:.2f}] m, end {a['ego_lat_end']:.2f}; "
          f"x_end {a['x_end']:.1f}; max per-tick lateral step {a['max_lat_step_m']:.3f} m = {a['max_lat_step_over_v_dt']:.3f} x (v*dt) (continuous, no teleport)",
          f"{indent}- min clearance to each actor (m): {({k: (None if v is None else round(v, 2)) for k, v in a['min_clearance_m'].items()})}",
@@ -394,7 +429,7 @@ def report(ctx, r04, r05, r06, r08, r15, r18, sel):
       "Records: `results/carla/compositional/*.jsonl`. Labels are `contract.classify` output only. G cells below read `world1/world2` (-inf = hard failure, None = unrun).\n")
     w(f"**Authority.** Every spec declares `a_lat_max = {CP.A_LAT_MAX:g}` m/s^2 (dynamic-limit margin from |v * yaw_rate|, as in the core cases); RC18 additionally declares "
       f"`a_comb_max = {CP.A_COMB_MAX:g}` m/s^2, a friction-circle margin sqrt(a_long^2 + a_lat^2) <= limit from MEASURED accelerations "
-      f"(a_long = tick difference of ego speed, centred {__import__('sim.harness', fromlist=['x']).A_LONG_SMOOTH_TICKS}-tick moving average = 0.25 s, declared before any run; a_lat = |v * yaw_rate| per tick, unsmoothed). "
+      f"(a_long = tick difference of ego speed, centred {__import__('sim.harness', fromlist=['x']).A_LONG_SMOOTH_TICKS}-tick moving average = 0.25 s, declared before any run; a_lat = |v * yaw_rate| per tick, unsmoothed; ticks with ego speed < {CP.H.A_COMB_VMIN:g} m/s are excluded from a_comb because CARLA's brake model locks the wheels at the end of a stop, measured -28..-35 m/s^2 for ~4 ticks below ~4.3 m/s in a brake_hold diagnostic at v 18; the unmasked peak is still recorded as `a_comb_unmasked`). "
       "**Disclosure:** CARLA's tyre friction in this profile is non-physical (`friction_fixed` 5.0, braking set through brake torque), so CARLA's own tyre limit is not the authority; "
       "the declared 8.0 m/s^2 limits are the physical-plausibility authority and enter only as margins (they make a manoeuvre a non-witness, never a hand-written label).\n")
     w("Selection rules were declared in the script header before the run; every scan row is reported below.\n")
@@ -426,16 +461,27 @@ def report(ctx, r04, r05, r06, r08, r15, r18, sel):
     w("\n## RC04: brake then change lanes\n")
     w("Library (per lc_time L, L in 1.6 and 2.0): brake_hold, lane_follow, immediate_lane_change (Bypass, L), staged_brake_0.4_change and staged_brake_0.8_change (StagedBrakeChange, L). "
       "Immediate lane change is a different candidate at each L; scenes where the immediate change at lc 2.0 already passes are therefore not witnesses of the staged policy in the lc-2.0 library.\n")
-    w("| lc | v | gap | evidence | contrast | margins |\n|---|---|---|---|---|---|")
-    for (lc, v, g), r in sorted(r04.items()):
-        w(f"| {lc:g} | {v:g} | {g} | {r['evidence_class']} | {rc04_contrast(r)} | {mrows(r)} |")
+    w("| grid | lc | v | gap | evidence | contrast | margins |\n|---|---|---|---|---|---|---|")
+    for (lib, lc, v, g), r in sorted(r04.items()):
+        w(f"| {lib} | {lc:g} | {v:g} | {g} | {r['evidence_class']} | {rc04_contrast(r)} | {mrows(r)} |")
     s = sel["RC04"]
     if s:
-        w(f"\nSelected: lc {s['sel'][0]:g}, v {s['sel'][1]:g}, gap {s['sel'][2]} (window {s['window']}); witness `{s['witness']}`.\n\nAudited witness trace summary:")
+        w(f"\nSelected: {s['sel']} (window {s['window']}); witness `{s['witness']}`; re-run vs scan max |dG| = {s['rerun']}.\n\nAudited witness trace summary:")
         L.extend(trace_lines(s["audit"]))
+        w("\nbrake_hold trace (refuted):")
+        L.extend(trace_lines(s["audit_bh"]))
+        w("\nimmediate_lane_change trace (refuted):")
+        L.extend(trace_lines(s["audit_imm"]))
     else:
-        w("\nNo scene shows the contrast (staged passes while brake_hold and the immediate change fail); no positive RC04 witness on CARLA under the 8.0 m/s^2 limit in the searched grid "
-          "(lc 1.6 and 2.0, v 14 and 18, gap 18-38 step 2).")
+        w("\nNo scene shows the contrast (a staged policy passes while brake_hold and the immediate change both fail): no positive RC04 witness on CARLA under the 8.0 m/s^2 limit "
+          "in the searched grid.  Searched: base grid lc {1.6, 2.0} x v {14, 18} x gap 18-38 step 2 (ps 0.4, 0.8); extended grid lc {1.6, 2.0} x v {16, 18, 20, 22} x gap [stop_dist-10, stop_dist] step 2 (ps 0.2-1.0).  "
+          "Nothing is forced.")
+        near = [(k, mw(r)) for k, r in sorted(r04.items())
+                if any(all_ok(gs) for p, gs in mw(r).items() if p.startswith("staged_brake")) and any_bad(mw(r)["brake_hold"])]
+        w("Scenes where a staged policy passes and brake_hold fails (the only candidates): " +
+          (("; ".join(f"{k}: immediate_lane_change={'/'.join(fm(x) for x in m['immediate_lane_change'])}" for k, m in near)) if near else "none") +
+          ".  Where such a scene exists the immediate lane change passes as well, so the staged policy is not the unique supported continuation; "
+          "elsewhere brake_hold fails and every staged policy fails too (braking first spends the distance the lane change needs).")
     # ---- RC05
     w("\n## RC05: abort an unsafe lane change\n")
     w("Every policy first executes a physical left lane change (prefix 1.0 s, lc_time 3.0) inside the episode; the rear vehicle in the target lane is hidden until t = 1.25 s. "
@@ -446,7 +492,7 @@ def report(ctx, r04, r05, r06, r08, r15, r18, sel):
         w(f"| {k[0]:g} | {k[1]:g} | {k[2]:g} | {r['evidence_class']} | {rc05_contrast(r)} | {mrows(r)} |")
     s = sel["RC05"]
     if s:
-        w(f"\nSelected: {s['sel']} (window size {len(s['window'])}); witness `abort_and_stabilize`.\n")
+        w(f"\nSelected: {s['sel']} (window size {len(s['window'])}); witness `abort_and_stabilize`; full-library re-run vs scan max |dG| = {s['rerun']}.\n")
         for wn, a in s["audit"].items():
             w(f"Audited witness trace, world `{wn}`:")
             L.extend(trace_lines(a))
@@ -464,7 +510,7 @@ def report(ctx, r04, r05, r06, r08, r15, r18, sel):
         w(f"| {k[0]:g} | {k[1]:g} | {k[2]:g} | {r['evidence_class']} | {rc06_contrast(r)} | {mrows(r)} |")
     s = sel["RC06"]
     if s:
-        w(f"\nSelected: {s['sel']}; witness `wait_observe_enter`.\n\nAudited witness trace summary:")
+        w(f"\nSelected: {s['sel']}; witness `wait_observe_enter`; full-library re-run vs scan max |dG| = {s['rerun']}.\n\nAudited witness trace summary:")
         L.extend(trace_lines(s["audit"]))
         w("\nRefuted immediate_entry trace:")
         L.extend(trace_lines(s["audit_immediate"]))
@@ -487,7 +533,7 @@ def report(ctx, r04, r05, r06, r08, r15, r18, sel):
         w(f"| {k[0]:g} | {k[1]:g} | {k[2]:g} | {r['evidence_class']} | {rc15_contrast(r)} | {mrows(r)} |")
     s = sel["RC15"]
     if s:
-        w(f"\nSelected ({s['kind']} contrast; strong scenes {s['strong']}, weak-or-strong scenes {len(s['weak'])}): {s['sel']}; witness `observe_yield_else_fallback`.\n")
+        w(f"\nSelected ({s['kind']} contrast; strong scenes {s['strong']}, weak-or-strong scenes {len(s['weak'])}): {s['sel']}; witness `observe_yield_else_fallback`; full-library re-run vs scan max |dG| = {s['rerun']}.\n")
         for wn, a in s["audit"].items():
             w(f"Audited witness trace, world `{wn}`:")
             L.extend(trace_lines(a))
@@ -506,6 +552,10 @@ def report(ctx, r04, r05, r06, r08, r15, r18, sel):
         if c:
             a = r18[(v, g, False)]
             w(f"| {v:g} | {g} | {a['evidence_class']} / {mrows(a)} | {r['evidence_class']} / {mrows(r)} | {rc18_refuted_by_comb(a, r) or '-'} |")
+    flips = [(v, g, r18[(v, g, False)]["evidence_class"], r["evidence_class"]) for (v, g, c), r in sorted(r18.items())
+             if c and r18[(v, g, False)]["evidence_class"] != r["evidence_class"]]
+    w(f"\nScenes whose evidence class changes when the combined limit is added (a_lat-only -> a_lat + a_comb): {flips or 'none'}.  "
+      "A change R_REF -> U_LIBRARY means the only witness was a command outside the combined authority: the scene is then negative only relative to this library, never U_MODEL.")
     s = sel["RC18"]
     if s:
         v, g = s["sel"]
@@ -515,6 +565,8 @@ def report(ctx, r04, r05, r06, r08, r15, r18, sel):
         for p in list(s["cmds"]) + s["feasible_alternatives"][:1]:
             dp = s["rec_comb"]["traces"][f"{p}/static_blocker"]["margin"].get("dyn_peaks", {})
             w(f"| {p} | {fm(dp.get('a_lat'))} | {fm(dp.get('a_long_smoothed'))} | {fm(dp.get('a_comb'))} | {dp.get('dyn_margin')} |")
+        w(f"\nFull-library re-run vs scan max |dG| = {s['rerun']}.  Audited refuted-command trace (`{s['cmds'][0]}`):")
+        L.extend(trace_lines(s["audit_cmd"]))
         if "audit" in s:
             w(f"\nAudited feasible-alternative trace (`{s['witness']}`):")
             L.extend(trace_lines(s["audit"]))

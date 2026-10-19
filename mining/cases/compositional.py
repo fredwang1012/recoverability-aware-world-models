@@ -18,6 +18,7 @@ usable left lane).  Intentions are documented here only; labels always come from
           authority; the declared 8.0 m/s^2 limits are.
 """
 from sim import policies as P
+from sim import harness as H
 from sim.harness import evaluate
 
 from cases import two_lane as TL
@@ -132,6 +133,7 @@ def rc18_spec(theta, cfg, comb=True):
     sp = _base(theta, _stop_horizon(theta, cfg), {"blk": TL._blk(theta["gap_m"])}, cfg)
     if comb:
         sp["a_comb_max"] = A_COMB_MAX
+        sp["a_comb_vmin"] = H.A_COMB_VMIN
     return sp
 
 

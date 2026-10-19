@@ -12,6 +12,9 @@ spec (what is built; intent lives elsewhere):
     a_comb_max (optional): friction-circle limit sqrt(a_long^2 + a_lat^2) <= a_comb_max, from MEASURED accelerations
         (a_long = ego speed difference per tick, smoothed over A_LONG_SMOOTH_TICKS to suppress finite-difference / ABS noise;
         a_lat = |v * yaw_rate| per tick, unsmoothed as for a_lat_max).  A dynamic-limit margin like a_lat_max.
+        Ticks with ego speed < a_comb_vmin (spec, default A_COMB_VMIN = 5 m/s) are excluded: CARLA's brake model locks the wheels
+        at the end of a stop (measured -28..-35 m/s^2 for ~4 ticks below ~4.3 m/s with a 6.2 m/s^2 plateau), a model artifact of
+        the non-physical tyre friction, not a commanded manoeuvre.  The unmasked peak is still recorded (dyn_peaks.a_comb_unmasked).
     route_goal {x} (optional): reported SEPARATELY as route_goal_completed (ego front bumper reached x without contact);
         it never enters the margin, the terminal test or the label.
 world (a mechanism, chosen once per episode):
@@ -32,6 +35,7 @@ from .queues import CommandPipeline, ObservationFeed
 from .trackers import EgoController
 from .types import DT, Snapshot
 
+A_COMB_VMIN = 5.0                # m/s: a_comb is evaluated only while the ego speed is >= this (see below); declared before any CARLA run
 A_LONG_SMOOTH_TICKS = 5          # 0.25 s centred moving average of the measured longitudinal acceleration (a_comb_max only)
 
 
@@ -146,14 +150,19 @@ def run_episode(plant, spec, policy, world, cfg=M.DEFAULT_V2, seed=0):
     yaw = np.array([p[2] for p in ego_hist])
     a_lat = np.abs(np.array(speeds) * np.gradient(yaw, dt)) if len(yaw) > 2 else np.zeros(len(speeds))
     dyn = [("a_lat", a_lat, spec["a_lat_max"])] if "a_lat_max" in spec else []
-    ax_s = smooth([0.0] + list(ax_hist))                 # aligned to the state index (ax_hist[i] is measured during step i -> i+1)
-    a_comb = np.sqrt(ax_s[:len(a_lat)] ** 2 + a_lat ** 2)
+    vmin = spec.get("a_comb_vmin", A_COMB_VMIN)
+    ax_raw = np.array([0.0] + list(ax_hist))             # aligned to the state index (ax_hist[i] is measured during step i -> i+1)
+    fast = np.array(speeds) >= vmin
+    ax_s = smooth(np.where(fast[:len(ax_raw)], ax_raw, 0.0))
+    ax_u = smooth(ax_raw)
+    a_comb_u = np.sqrt(ax_u[:len(a_lat)] ** 2 + a_lat ** 2)
+    a_comb = np.where(fast[:len(a_lat)], np.sqrt(ax_s[:len(a_lat)] ** 2 + a_lat ** 2), 0.0)
     if "a_comb_max" in spec:
         dyn.append(("a_comb", a_comb, spec["a_comb_max"]))
     dyn = dyn or None
     term_ok = False if collision else terminal_test(policy.terminal, ego_hist, np.array(speeds), dt, cfg, spec)
     out = M.compute(trace, cfg, terminal_ok=term_ok, road=spec["road"], dyn=dyn)
-    out["dyn_peaks"] = {"a_lat": float(np.max(a_lat)), "a_long_smoothed": float(np.max(np.abs(ax_s))), "a_comb": float(np.max(a_comb)),
+    out["dyn_peaks"] = {"a_lat": float(np.max(a_lat)), "a_long_smoothed": float(np.max(np.abs(ax_s))), "a_comb": float(np.max(a_comb)), "a_comb_unmasked": float(np.max(a_comb_u)),
                          "dyn_margin": {n: float(np.min((lim - np.abs(ser)) / lim)) for n, ser, lim in (dyn or [])}}
     goal = spec.get("route_goal")
     route_done = None if goal is None else bool((not collision) and max(p[0] + states["ego"].hl for p in ego_hist) >= goal["x"])
@@ -210,7 +219,7 @@ def evaluate(plant_factory, spec, library, worlds, theta, case_id, family_id, sp
         policies=[p["name"] for p in descr], worlds=[w["name"] for w in worlds], R_raw=R_raw, R_norm=R_norm, terminal_ok=T,
         margin_config=dict(M.asdict(cfg)), evidence_scope=evidence_scope, seed=seed, policy_descriptors=descr,
         runtime=runtime or {}, physics_profile_id=physics_profile_id,
-        geometry={"spec": {k: spec[k] for k in ("ego", "actors", "road", "lane_w", "horizon_s", "delay", "a_lat_max", "a_comb_max", "route_goal") if k in spec}},
+        geometry={"spec": {k: spec[k] for k in ("ego", "actors", "road", "lane_w", "horizon_s", "delay", "a_lat_max", "a_comb_max", "a_comb_vmin", "route_goal") if k in spec}},
         timestamps={k: v["timestamps"] for k, v in runs.items()},
         events={k: {"termination": v["termination"], "events": v["events"]} for k, v in runs.items()},
         traces={k: {"final": v["final"], "margin": v["margin"], **({"route_goal_completed": v["route_goal_completed"]}
