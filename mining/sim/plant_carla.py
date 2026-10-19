@@ -32,6 +32,18 @@ def _wrap(deg):
     return (deg + 180.0) % 360.0 - 180.0
 
 
+def wheel_params(profile, decel):
+    """(tire_friction, max_brake_torque) realising `decel` (m/s^2) under a calibrated profile.  New profiles (knob ==
+    'max_brake_torque') interpolate torque from decel at the fixed friction; targets outside the measured range are clipped
+    to it.  Old profiles (no knob) interpolate friction from decel at the single recorded torque."""
+    if profile.get("knob") == "max_brake_torque":
+        dec = np.maximum.accumulate(np.asarray(profile["decel"], float))
+        torque = float(np.interp(decel, dec, np.asarray(profile["torque"], float)))
+        return float(profile["friction_fixed"]), torque
+    mu = float(np.interp(decel, profile["decel"], profile["friction"]))
+    return mu, profile.get("max_brake_torque")
+
+
 class CarlaPlant:
     name = "carla"
 
@@ -114,9 +126,8 @@ class CarlaPlant:
             return
         if self.decel_target is None or not self.profile_data:
             return
+        mu, torque = wheel_params(self.profile_data, self.decel_target)
         pc = a.get_physics_control()
-        mu = float(np.interp(self.decel_target, self.profile_data["decel"], self.profile_data["friction"]))
-        torque = self.profile_data.get("max_brake_torque")
         ws = pc.wheels
         for w in ws:
             w.tire_friction = mu
@@ -134,6 +145,11 @@ class CarlaPlant:
         warm_back = lambda v: v * self.warm_s
         self.actors["ego"] = self._spawn(self.bp_ego, ego["x"] - warm_back(ego["v"]), ego["lat"], ego["v"], "ego")
         self._apply_physics(self.actors["ego"])
+        if ego["v"] and (self.wheels_override is not None or self.decel_target is not None):
+            # apply_physics_control also zeroes the velocity, and applies it on the NEXT tick (racy if the speed is re-imposed
+            # first): tick once to let the control take effect, then re-impose the initial speed
+            self.world.tick()
+            self.actors["ego"].set_target_velocity(C.Vector3D(self.site.f[0] * ego["v"], self.site.f[1] * ego["v"], 0.0))
         pc = self.actors["ego"].get_physics_control()
         self.max_steer = math.radians(pc.wheels[0].max_steer_angle)
         sens_bp = self.lib.find("sensor.other.collision")

@@ -114,46 +114,59 @@ def set_wheels(plant, friction=None, torque=None):
     plant.actors["ego"].apply_physics_control(pc)
 
 
-def measure_brake(plant, friction, torque, v0=20.0, steer=0.0):
-    """Full brake from v0: decel = -slope of a linear fit of v(t) on 0.9*v0 .. 0.2*v0; also onset delay and residual RMS."""
+def measure_brake(plant, friction, torque, v0=20.0, steer=0.0, diag=None, _retry=2):
+    """Full brake from v0: decel = -slope of a linear fit of v(t) on 0.9*v0 .. 0.2*v0; also onset delay and residual RMS.
+    `diag` (a dict, optional) is filled with per-run diagnostics even when the fit fails (returns None)."""
     plant.wheels_override = (friction, torque)                   # applied right after spawn, before warm-up
     _one_ego(plant, v0)
-    t, v, ay = [], [], []
-    ctl_k0 = len(t)
+    t, v, yaw, lat = [], [], [], []
     prev_yaw, a_lat = None, []
     for k in range(int(12.0 / DT)):
         snap = plant.step({"ego": (0.0, 1.0, steer)})
         e = snap.actors["ego"]
-        t.append(k * DT); v.append(e.v)
+        t.append(k * DT); v.append(e.v); yaw.append(e.yaw); lat.append(e.lat)
         if prev_yaw is not None:
             a_lat.append(abs(e.v * (e.yaw - prev_yaw) / DT))
         prev_yaw = e.yaw
         if e.v < 0.5:
             break
     t, v = np.array(t), np.array(v)
+    if v[0] < 0.9 * v0 and _retry > 0:                           # initial speed was lost at spawn: invalid run, redo
+        print(f"  start-speed check failed (v_start={v[0]:.2f} < 0.9*{v0}); retrying", flush=True)
+        return measure_brake(plant, friction, torque, v0, steer, diag, _retry - 1)
     sel = (v <= 0.9 * v0) & (v >= 0.2 * v0)
+    if diag is not None:
+        diag.update({"friction": friction, "torque": torque, "trace_len": int(len(v)), "v_start": float(v[0]), "v_min": float(v.min()),
+                     "n_sel": int(sel.sum()), "sel_lt_5": bool(sel.sum() < 5), "max_abs_yaw": float(np.max(np.abs(yaw))),
+                     "max_abs_lat": float(np.max(np.abs(lat))), "v_end": float(v[-1])})
     if sel.sum() < 5:
         return None
     slope, icpt = np.polyfit(t[sel], v[sel], 1)
     resid = float(np.sqrt(np.mean((v[sel] - (slope * t[sel] + icpt)) ** 2)))
     onset = next((i for i in range(1, len(v)) if (v[i - 1] - v[i]) / DT > 0.5), None)
     return {"decel": float(-slope), "resid_rms": resid, "onset_delay_s": None if onset is None else onset * DT,
-            "a_lat_max": float(max(a_lat)) if a_lat else 0.0}
+            "a_lat_max": float(max(a_lat)) if a_lat else 0.0,
+            "max_abs_yaw": float(np.max(np.abs(yaw))), "max_abs_lat": float(np.max(np.abs(lat)))}
 
 
-def measure_steer(plant, v0=12.0, steer=0.3):
+def measure_steer(plant, v0=12.0, steer=0.05, secs=2.0):
+    """Constant small steer, throttle 0.15 (speed is NOT held exactly: v_mean/v_end are reported).  Yaw is unwrapped;
+    yaw_rate_ss = mean yaw rate over t in [0.5, 1.5] s (the response keeps evolving later: speed bleeds and large steer spins out);
+    t90 = first time the rate reaches 90% of it.  Sign convention: positive steer is expected to give positive road-frame yaw
+    (right turn); `sign_ok` records whether it did."""
+    plant.wheels_override = None
     _one_ego(plant, v0)
-    yaw_rates, prev = [], None
-    for k in range(int(2.5 / DT)):
+    yaws, vs = [], []
+    for k in range(int(secs / DT)):
         snap = plant.step({"ego": (0.15, 0.0, steer)})
-        yaw = snap.actors["ego"].yaw
-        if prev is not None:
-            yaw_rates.append((yaw - prev) / DT)
-        prev = yaw
-    yr = np.array(yaw_rates)
-    ss = float(np.mean(yr[-10:]))
-    t90 = next((i * DT for i, x in enumerate(yr) if abs(x) >= 0.9 * abs(ss)), None)
-    return {"steer_cmd": steer, "yaw_rate_ss": ss, "t90_s": t90, "yaw_rate_per_steer": ss / steer}
+        yaws.append(snap.actors["ego"].yaw); vs.append(snap.actors["ego"].v)
+    yaw = np.unwrap(np.array(yaws))
+    yr = np.diff(yaw) / DT
+    i0, i1 = int(0.5 / DT), int(1.5 / DT)
+    ss = float(np.mean(yr[i0:i1]))
+    t90 = next((i * DT for i, x in enumerate(yr) if abs(ss) > 1e-9 and x / ss >= 0.9), None)
+    return {"steer_cmd": steer, "yaw_rate_ss": ss, "t90_s": t90, "yaw_rate_per_steer": ss / steer,
+            "sign_ok": bool(ss * steer > 0), "v_start": float(vs[0]), "v_end": float(vs[-1]), "total_yaw_rad": float(yaw[-1] - yaw[0])}
 
 
 def measure_tracking(plant, v0=12.0, lc_time=3.0):
@@ -174,38 +187,92 @@ def measure_tracking(plant, v0=12.0, lc_time=3.0):
             "final_lat_m": float(e.lat), "target_lat_m": -TL.LANE_W}
 
 
+TORQUE_FACTORS = (0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0)
+FRICTION_FIXED = 5.0                        # braking is torque-limited here (3.5 / 5.0 / 8.0 gave the same decel at fixed torque)
+FRICTION_SWEEP = (0.6, 1.0, 1.5, 2.5, 3.5, 5.0)
+
+
+def _measure_twice(plant, mu, torque, log, steer=0.0):
+    """Two independent fresh-start measurements; the diagnostics of every run are printed and kept."""
+    runs = []
+    for rep in range(2):
+        d = {}
+        m = measure_brake(plant, mu, torque, steer=steer, diag=d)
+        d["rep"] = rep
+        log.append(d)
+        print("diag", json.dumps(d), flush=True)
+        if m is None:
+            print(f"  WARNING: no decel fit for mu={mu} torque={torque} rep={rep}", flush=True)
+        else:
+            runs.append(m)
+    if not runs:
+        return None
+    out = {"friction": float(mu), "max_brake_torque": float(torque), "n_repeats": len(runs),
+           "decel": float(np.mean([r["decel"] for r in runs])), "resid_rms": float(np.mean([r["resid_rms"] for r in runs])),
+           "repeat_diff": float(abs(runs[0]["decel"] - runs[-1]["decel"])) if len(runs) > 1 else None,
+           "onset_delay_s": runs[0]["onset_delay_s"], "a_lat_max": float(max(r["a_lat_max"] for r in runs)),
+           "max_abs_yaw": float(max(r["max_abs_yaw"] for r in runs))}
+    print(out, flush=True)
+    return out
+
+
 def cmd_calibrate(a):
     client, world, site = connect(a.host, a.port, a.town)
     plant = make_plant(client, world, site)
     try:
         _one_ego(plant, 20.0)
-        default_torque = plant.actors["ego"].get_physics_control().wheels[0].max_brake_torque
-        torques = [default_torque * f for f in (1.0, 2.0)]
-        rows = []
-        for torque in torques:
-            for mu in (0.6, 1.0, 1.5, 2.5, 3.5, 5.0):
-                m = measure_brake(plant, mu, torque)
-                if m:
-                    rows.append({"friction": mu, "max_brake_torque": float(torque), **m})
-                    print(rows[-1])
-        base = sorted([r for r in rows if abs(r["max_brake_torque"] - default_torque) < 1e-6], key=lambda r: r["decel"])
-        dec = np.array([r["decel"] for r in base])
-        steer = measure_steer(plant)
+        default_torque = float(plant.actors["ego"].get_physics_control().wheels[0].max_brake_torque)
+        diag = []
+        t_rows = []
+        for f in TORQUE_FACTORS:
+            r = _measure_twice(plant, FRICTION_FIXED, default_torque * f, diag)
+            if r:
+                t_rows.append({**r, "factor": f})
+        f_rows = []
+        for mu in FRICTION_SWEEP:
+            r = _measure_twice(plant, mu, default_torque, diag)
+            if r:
+                f_rows.append(r)
+        t_rows.sort(key=lambda r: r["max_brake_torque"])
+        torque = [r["max_brake_torque"] for r in t_rows]
+        dec = np.array([r["decel"] for r in t_rows])
+        steer = [measure_steer(plant, steer=s) for s in (0.02, 0.05, 0.1)]
         track = measure_tracking(plant)
-        combined = measure_brake(plant, base[len(base) // 2]["friction"], default_torque, steer=0.15)
-        prof = {"blueprint": "vehicle.tesla.model3", "dt": DT, "default_max_brake_torque": float(default_torque),
-                "friction": [r["friction"] for r in base], "decel": [r["decel"] for r in base],
-                "max_brake_torque": float(default_torque), "table": rows, "monotone": bool(np.all(np.diff(dec) >= 0)),
-                "decel_range": [float(dec.min()), float(dec.max())], "steer_response": steer, "lateral_tracking": track,
-                "combined_brake_steer": combined, "response_delay_s": next((r["onset_delay_s"] for r in base if r["onset_delay_s"] is not None), None),
-                "covers_5_to_9": bool(dec.min() <= 5.0 and dec.max() >= 9.0)}
+        mid = t_rows[len(t_rows) // 2]
+        combined = measure_brake(plant, FRICTION_FIXED, mid["max_brake_torque"], steer=0.02)
+        base = next((r for r in t_rows if abs(r["max_brake_torque"] - default_torque) < 1e-6), None)
+        rms_all = [r["resid_rms"] for r in t_rows]
+        rep_all = [r["repeat_diff"] for r in t_rows if r["repeat_diff"] is not None]
+        prof = {"blueprint": "vehicle.tesla.model3", "dt": DT, "knob": "max_brake_torque", "friction_fixed": FRICTION_FIXED,
+                "default_max_brake_torque": default_torque, "torque": torque, "decel": [float(d) for d in dec],
+                "monotone": bool(np.all(np.diff(dec) >= 0)), "strictly_monotone": bool(np.all(np.diff(dec) > 0)),
+                "decel_range": [float(dec.min()), float(dec.max())],
+                "covers_5_to_9": bool(dec.min() <= 5.0 and dec.max() >= 9.0),
+                "resid_rms_mean": float(np.mean(rms_all)), "resid_rms_max": float(np.max(rms_all)),
+                "repeat_diff_max": float(np.max(rep_all)) if rep_all else None,
+                "response_delay_s": base["onset_delay_s"] if base else None,
+                "torque_table": t_rows, "friction_table": f_rows, "steer_response": steer, "lateral_tracking": track,
+                "combined_brake_steer": combined, "run_diagnostics": diag}
         prof["id"] = "pp_" + hashlib.sha256(json.dumps({k: v for k, v in prof.items() if k != "id"}, sort_keys=True).encode()).hexdigest()[:10]
         _write(f"{OUT}/physics_profile.json", json.dumps(prof, indent=2))
+        fmt = lambda x: "n/a" if x is None else f"{x:.3f}"
         L = [f"## CARLA physics profile {prof['id']} (Tesla Model 3, dt={DT})", "",
-             f"decel range {prof['decel_range'][0]:.2f}..{prof['decel_range'][1]:.2f} m/s^2; monotone in friction: {prof['monotone']}; "
-             f"covers 5-9 m/s^2: {prof['covers_5_to_9']}", "", "| friction | brake torque | decel | resid RMS (m/s) | onset delay (s) |", "|---|---|---|---|---|"]
-        L += [f"| {r['friction']} | {r['max_brake_torque']:.0f} | {r['decel']:.2f} | {r['resid_rms']:.3f} | {r['onset_delay_s']} |" for r in rows]
-        L += ["", f"steer response: {steer}", f"lateral tracking (3 s lane change @12 m/s): {track}", f"combined brake+steer: {combined}"]
+             f"knob: max_brake_torque at fixed tire_friction {FRICTION_FIXED}; default torque {default_torque:.0f}",
+             f"decel range {prof['decel_range'][0]:.2f}..{prof['decel_range'][1]:.2f} m/s^2; monotone in torque: {prof['monotone']} "
+             f"(strict: {prof['strictly_monotone']}); covers 5-9 m/s^2: {prof['covers_5_to_9']}",
+             f"mean resid RMS {prof['resid_rms_mean']:.3f} m/s (max {prof['resid_rms_max']:.3f}); max repeat difference "
+             f"{fmt(prof['repeat_diff_max'])} m/s^2; response delay {prof['response_delay_s']} s", "",
+             "### Torque sweep (friction fixed)", "",
+             "| torque factor | max_brake_torque | decel (m/s^2) | repeat diff | resid RMS (m/s) | onset delay (s) | max abs yaw (rad) |",
+             "|---|---|---|---|---|---|---|"]
+        L += [f"| {r['factor']} | {r['max_brake_torque']:.0f} | {r['decel']:.2f} | {fmt(r['repeat_diff'])} | {r['resid_rms']:.3f} | "
+              f"{r['onset_delay_s']} | {r['max_abs_yaw']:.4f} |" for r in t_rows]
+        L += ["", f"### Friction sweep (torque fixed at default {default_torque:.0f})", "",
+              "| friction | decel (m/s^2) | repeat diff | resid RMS (m/s) | onset delay (s) |", "|---|---|---|---|---|"]
+        L += [f"| {r['friction']} | {r['decel']:.2f} | {fmt(r['repeat_diff'])} | {r['resid_rms']:.3f} | {r['onset_delay_s']} |" for r in f_rows]
+        L += ["", "### Steer response (12 m/s, constant steer, yaw unwrapped; positive steer expected -> positive road-frame yaw)", ""]
+        L += [f"- {s}" for s in steer]
+        L += ["", f"lateral tracking (3 s lane change @12 m/s): {track}", f"combined brake+steer: {combined}"]
         _write(f"{OUT}/calibration.md", "\n".join(L) + "\n")
         print("\n".join(L))
     finally:
