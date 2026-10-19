@@ -24,6 +24,7 @@ from reference import corridor as REF
 from sim import policies as P
 from sim.harness import run_episode
 
+DT = 0.05
 OUT = "results/carla/foundation"
 POST_BP = "vehicle.diamondback.century"
 V, TAU, GAP_RC17, DECEL_TARGET = 12.0, 0.25, 18.0, 6.19
@@ -48,6 +49,9 @@ class Ctx:
         if os.path.exists(path):
             for line in open(path):
                 r = json.loads(line)
+                if r.get("physics_profile_id") != self.pid:
+                    raise RuntimeError(f"{path}: cached record has physics_profile_id {r.get('physics_profile_id')} != current "
+                                       f"{self.pid}; refusing to mix profiles (move the old file aside)")
                 d[r["_key"]] = r
         self.cache[sweep] = d
         return d
@@ -227,7 +231,12 @@ def write_report(ctx, cal, g_brake, g_full, dl, rc16):
     ana = {"time": d_req(b_time), "dist": d_req(b_dist)}          # "dist" = primary b_cal
     tau_star = lambda b: (GAP_RC17 - V * V / (2 * b) - C) / V
     ts = {"time": tau_star(b_time), "dist": tau_star(b_dist)}
+    cv = cal[0]                                                  # the tau = 0.25 run (the sweep's configuration)
+    d_von = cv["v_onset"] * tau_eff + cv["v_onset"] ** 2 / (2 * b_dist) + C
     w("## Anchor vs CARLA (residual)\n")
+    w("**Independence caveat.** b_cal and tau_eff above are calibrated from the same plant, speed (12 m/s), decel target and "
+      "brake_hold trace that the sweeps use.  The RC01/RC02/RC17 residuals therefore test the STRUCTURE of the constant-b + "
+      "constant-delay formula (and the harness/labelling chain), not an independent prediction of CARLA from first principles.\n")
     w("Residual = CARLA - analytic.  CARLA bracket (lo infeasible, hi feasible; label = R_REF, i.e. brake_hold witness) is bisected "
       "to 0.25 m (gap) / 0.01 s (tau); `G=0` is the linear zero of brake_hold's continuous margin G between the bracketing samples.\n")
     w("| quantity | analytic (b_cal) | analytic (b_time, diagnostic) | CARLA label bracket | CARLA bracket mid | CARLA G=0 | residual (mid - analytic) | residual (G=0 - analytic) | residual (mid - b_time analytic, diagnostic) |")
@@ -249,8 +258,18 @@ def write_report(ctx, cal, g_brake, g_full, dl, rc16):
         mid = 0.5 * (hi + lo)
         g0 = dl["G0"]
         a1, a2 = ts["dist"] - onset, ts["time"] - onset
-        w(f"| RC17 tau* configured delay at gap {GAP_RC17} (s) | {a1:.3f} | {a2:.3f} | [{hi:.3f}, {lo:.3f}) | {mid:.3f} | {fmt(g0)} | "
-          f"{mid - a1:+.3f} | {fmt(None if g0 is None else g0 - a1)} | {mid - a2:+.3f} |")
+        w(f"| RC17 tau* configured delay at gap {GAP_RC17} (s) | {a1:.3f} | {a2:.3f} | [{hi:.3f}, {lo:.3f}) = ticks [{round(hi/DT)*DT:.2f}, {round(lo/DT)*DT:.2f}] | "
+          f"{mid:.3f} | n/a (tick step, see note) | within one tick (+/-{DT:.2f} s): {mid - a1:+.3f} | n/a | {mid - a2:+.3f} |")
+    res_mid = 0.5 * (g_brake["bracket"][0] + g_brake["bracket"][1]) if g_brake["bracket"] else float("nan")
+    w(f"\nRC01/RC02 residual decomposition (m): d_required at nominal v = {V} m/s: {ana['dist']:.3f}; with the measured onset speed "
+      f"v_onset = {cv['v_onset']:.3f} m/s (same tau_eff, same b_cal): {d_von:.3f}.  The speed shortfall explains "
+      f"{d_von - ana['dist']:+.3f} m of the {res_mid - ana['dist']:+.3f} m residual (bracket mid {res_mid:.3f}); what remains against the "
+      f"v_onset anchor is {res_mid - d_von:+.3f} m (bracket width 0.25 m, 0.05 s onset tick, non-constant decel).\n")
+    w("\nRC17 note: the act delay is quantised to the 0.05 s tick grid (round to nearest tick), so the label is a step function of the "
+      "configured delay with its edge at a tick midpoint (here 0.425 s: 0.40 s = 8 ticks feasible, 0.45 s = 9 ticks infeasible).  The "
+      "0.01 s bisection only locates that edge; the RC17 residual is therefore reported as within one tick (+/-0.05 s), and the "
+      "linear G=0 interpolation is dropped for RC17 (G is constant between tick edges, so the crossing is not a real boundary estimate).  "
+      "The analytic tau* lies inside the feasible-to-infeasible tick interval [0.40, 0.45].\n")
     w(f"\nAnalytic details: d_required = v*tau_eff + v^2/(2 b_cal) + c = {V}*{tau_eff:.3f} + {V*V:.0f}/(2*b_cal) + {C}; "
       f"tau* (total) = (gap - v^2/(2b) - c)/v = {ts['time']:.3f} s (b_time) / {ts['dist']:.3f} s (b_cal), configured-delay "
       f"equivalent subtracts the plant onset {onset:.3f} s.\n")
@@ -277,7 +296,8 @@ def write_report(ctx, cal, g_brake, g_full, dl, rc16):
     for r in dl["rows"]:
         t = r["theta"]["tau_s"]
         ok = r["evidence_class"] == "R_REF"
-        feas.append(t) if ok else None
+        if ok:
+            feas.append(t)
         ts_ = next(iter(r["timestamps"].values())) if r["timestamps"] else {}
         mo = ts_.get("measured_response_delay_s")
         w(f"| {t:.3f} | {t + onset:.3f} | {fmt(G_of(r, 'brake_hold'))} | {r['evidence_class']} | {ok} | "
@@ -286,16 +306,26 @@ def write_report(ctx, cal, g_brake, g_full, dl, rc16):
       f"(every tested tau <= {max(feas) if feas else float('nan'):.3f} s; bracket above).\n")
 
     w("## RC16: centre line clears, body does not (two_lane site, v = 12, tau = 0.25)\n")
+    w("RC16 is a policy-level contrast, not a label boundary: the case label stays R_REF throughout because brake_hold is a witness at every "
+      "offset (G = 0.668).  The contrast is in the per-policy margins: lane_follow (centre-line path) vs nudge_left (wider path).  "
+      "The analytic threshold 2.375 m below uses the MEASURED ego half-width (fitted from the lane_follow G=0 crossing, not predicted from "
+      "the declared 0.95 m).  The post is frozen (`set_simulate_physics(False)`), i.e. rigid by design: it cannot be pushed or tip over.\n")
+    w("**Collision-sensor corroboration was NOT obtained for RC16.**  Cause (one probe, 3 rollouts of an uncontrolled ego coasting at "
+      "12 m/s into the post at offset 0.4 m): a frozen actor DOES generate collision-sensor events, but the sensor event arrives 1-2 ticks "
+      "AFTER the first oriented-box overlap (bike frozen: obb at tick 127, sensor at tick 129; bike free: obb 127, sensor 128; frozen A2: "
+      "obb 127, sensor 128), and the harness ends the episode at the first OBB overlap (termination rule unchanged), so no sensor event "
+      "is ever logged in the RC16 records.  Sensor corroboration exists only for the RC01/RC02 gap-sweep collisions, where the sensor "
+      "event lands on or before the tick the harness stops.\n")
     w("Post = vehicle.diamondback.century (measured half-extents 0.83 x 0.29 m, physics frozen so it cannot tip into the lane) at lateral offset_m (+ = right of ego centre line).  Declared ego half-width 0.95 m, but the measured Tesla box half-width is ~1.085 m (back-solved from the G=0 crossing), "
       "reserve 1 m: lane_follow body+reserve conflict when offset < 1.085 + 0.29 + 1.0 = 2.375 m; contact when offset < ~1.375 m.  "
       "G values are the label-grade margins from the OBB evaluator; `contact` columns list the collision-sensor corroboration "
       "(source `sensor` = CARLA collision sensor, `obb` = evaluator box overlap).\n")
-    w("| offset (m) | centre line clears? | lane_follow G | lane_follow term / contact src | nudge_left G | brake_hold G | evidence | best policy |")
+    w("| offset (m) | point model safe? (abs(offset) > post half-width 0.3; true throughout this sweep) | lane_follow G | lane_follow term / contact src | nudge_left G | brake_hold G | evidence | best policy |")
     w("|---|---|---|---|---|---|---|---|")
     for r in rc16:
         o = r["theta"]["offset_m"]
         tm, src = _term(r, "lane_follow")
-        w(f"| {o:.2f} | {o > TL.POST_HW} | {fmt(G_of(r, 'lane_follow'))} | {tm} / {src} | {fmt(G_of(r, 'nudge_left'))} | "
+        w(f"| {o:.2f} | {abs(o) > TL.POST_HW} | {fmt(G_of(r, 'lane_follow'))} | {tm} / {src} | {fmt(G_of(r, 'nudge_left'))} | "
           f"{fmt(G_of(r, 'brake_hold'))} | {r['evidence_class']} | {r['best_policy']} |")
     w("")
     return "\n".join(L), {"b_time": b_time, "b_dist": b_dist, "tau_eff": tau_eff, "onset": onset}
@@ -316,14 +346,11 @@ def main():
     a = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
     ctx = Ctx(a.host, a.port)
-    try:
-        cal = calibrate(ctx)
-        g_brake = gap_sweep(ctx, "RC01", False, "rc01_gap_brake_only")
-        g_full = gap_sweep(ctx, "RC02", True, "rc02_gap_full_library")
-        dl = delay_sweep(ctx)
-        rc16 = rc16_sweep(ctx)
-    except BaseException:
-        raise
+    cal = calibrate(ctx)
+    g_brake = gap_sweep(ctx, "RC01", False, "rc01_gap_brake_only")
+    g_full = gap_sweep(ctx, "RC02", True, "rc02_gap_full_library")
+    dl = delay_sweep(ctx)
+    rc16 = rc16_sweep(ctx)
     text, info = write_report(ctx, cal, g_brake, g_full, dl, rc16)
     open("results/carla/foundation.md", "w", encoding="utf-8").write(text)
     json.dump(info, open(f"{OUT}/calibration_summary.json", "w"), indent=1)

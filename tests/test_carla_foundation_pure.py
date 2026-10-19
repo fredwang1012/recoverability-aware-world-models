@@ -15,3 +15,8 @@ def test_interp_zero_ignores_inf_and_finds_crossing():
 def test_g_of_decodes_serialised_minus_inf():
     r = {"policies": ["a", "b"], "R_raw": [["-inf"], [0.5]]}
     assert CF.G_of(r, "a") == -math.inf and CF.G_of(r, "b") == 0.5
+
+
+def test_interp_zero_with_inf_neighbour_uses_only_finite_pair():
+    # the (-inf, -0.2) pair must be skipped; crossing is between -0.2 and 0.6 at 16.25
+    assert abs(CF.interp_zero([14, 15, 16], [-math.inf, -0.2, 0.6]) - 15.25) < 1e-9
