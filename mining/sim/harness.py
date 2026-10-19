@@ -181,7 +181,7 @@ def evaluate(plant_factory, spec, library, worlds, theta, case_id, family_id, sp
         policies=[p["name"] for p in descr], worlds=[w["name"] for w in worlds], R_raw=R_raw, R_norm=R_norm, terminal_ok=T,
         margin_config=dict(M.asdict(cfg)), evidence_scope=evidence_scope, seed=seed, policy_descriptors=descr,
         runtime=runtime or {}, physics_profile_id=physics_profile_id,
-        geometry={"spec": {k: spec[k] for k in ("ego", "actors", "road", "lane_w", "horizon_s", "delay")}},
+        geometry={"spec": {k: spec[k] for k in ("ego", "actors", "road", "lane_w", "horizon_s", "delay", "a_lat_max") if k in spec}},
         timestamps={k: v["timestamps"] for k, v in runs.items()},
         events={k: {"termination": v["termination"], "events": v["events"]} for k, v in runs.items()},
         traces={k: {"final": v["final"], "margin": v["margin"]} for k, v in runs.items()},

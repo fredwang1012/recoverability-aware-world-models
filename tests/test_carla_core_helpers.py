@@ -40,3 +40,17 @@ def test_contrast_helpers_on_mock_record():
     assert cc.rc03_contrast(r) and VR.check_record(r) == []
     assert TL.rc03_library(True)[2]().params["lc_time"] == 2.0           # mock default unchanged
     assert TL.rc03_library(True, 1.0)[2]().params["lc_time"] == 1.0
+
+
+def test_rc07_contrast_requires_all_three_and_peak_alat():
+    def rec(a, b, c):
+        return {"policies": ["bypass_left", "bypass_then_stop", "bypass_then_return"], "R_raw": [[a], [b], [c]]}
+    assert cc.rc07_contrast(rec(0.1, "-inf", 0.1))
+    assert not cc.rc07_contrast(rec("-inf", "-inf", 0.1))          # primary-only collides: not the full contrast
+    assert not cc.rc07_contrast(rec(0.1, 0.1, 0.1))
+    assert not cc.rc07_contrast(rec(0.1, "-inf", None))            # unrun entry never counts
+    r = {"traces": {"bypass_left/w": {"margin": {"parts": {"dyn": 0.25}}}}}
+    assert abs(cc.peak_alat(r, "bypass_left") - 6.0) < 1e-12
+    assert cc.with_limit({"a": 1})["a_lat_max"] == cc.A_LAT_MAX
+    key, full = cc.rc07_select({(26, 80, 18): rec(0.1, "-inf", 0.1), (26, 80, 24): rec("-inf", "-inf", 0.1)})
+    assert key == (26, 80, 18) and full == [(26, 80, 18)]
