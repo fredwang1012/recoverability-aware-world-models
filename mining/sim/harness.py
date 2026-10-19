@@ -9,6 +9,11 @@ spec (what is built; intent lives elsewhere):
     road (lat_lo, lat_hi)  lane_w           horizon_s
     delay {obs, plan, act} seconds          obs_hz, policy_hz
     terminal {hold_s, post_maneuver_s}      a_lat_max (dynamic limit, optional)
+    a_comb_max (optional): friction-circle limit sqrt(a_long^2 + a_lat^2) <= a_comb_max, from MEASURED accelerations
+        (a_long = ego speed difference per tick, smoothed over A_LONG_SMOOTH_TICKS to suppress finite-difference / ABS noise;
+        a_lat = |v * yaw_rate| per tick, unsmoothed as for a_lat_max).  A dynamic-limit margin like a_lat_max.
+    route_goal {x} (optional): reported SEPARATELY as route_goal_completed (ego front bumper reached x without contact);
+        it never enters the margin, the terminal test or the label.
 world (a mechanism, chosen once per episode):
     name, actors {actor: {mode, ...}}, reveal {actor: t_reveal}, forget {actor: t_forget}
 
@@ -27,6 +32,18 @@ from .queues import CommandPipeline, ObservationFeed
 from .trackers import EgoController
 from .types import DT, Snapshot
 
+A_LONG_SMOOTH_TICKS = 5          # 0.25 s centred moving average of the measured longitudinal acceleration (a_comb_max only)
+
+
+def smooth(x, n=A_LONG_SMOOTH_TICKS):
+    """Centred moving average with edge replication (same length as x)."""
+    x = np.asarray(x, float)
+    if n <= 1 or len(x) == 0:
+        return x
+    h = n // 2
+    xp = np.concatenate([np.full(h, x[0]), x, np.full(h, x[-1])])
+    return np.convolve(xp, np.ones(n) / n, mode="valid")[:len(x)]
+
 
 @dataclass
 class EpisodeResult:
@@ -41,6 +58,7 @@ class EpisodeResult:
     ego: list = field(default_factory=list)            # (t, x, lat, yaw, v)
     timestamps: dict = field(default_factory=dict)
     geometry: dict = field(default_factory=dict)
+    route_goal_completed: object = None                  # None = no route goal declared; else bool (never part of the label)
 
 
 def _poses(states):
@@ -127,9 +145,18 @@ def run_episode(plant, spec, policy, world, cfg=M.DEFAULT_V2, seed=0):
     trace = {"dt": dt, "ego": rec["ego"], "others": {n: rec[n] for n in names if n != "ego"}, "half": {**half}}
     yaw = np.array([p[2] for p in ego_hist])
     a_lat = np.abs(np.array(speeds) * np.gradient(yaw, dt)) if len(yaw) > 2 else np.zeros(len(speeds))
-    dyn = [("a_lat", a_lat, spec["a_lat_max"])] if "a_lat_max" in spec else None
+    dyn = [("a_lat", a_lat, spec["a_lat_max"])] if "a_lat_max" in spec else []
+    ax_s = smooth([0.0] + list(ax_hist))                 # aligned to the state index (ax_hist[i] is measured during step i -> i+1)
+    a_comb = np.sqrt(ax_s[:len(a_lat)] ** 2 + a_lat ** 2)
+    if "a_comb_max" in spec:
+        dyn.append(("a_comb", a_comb, spec["a_comb_max"]))
+    dyn = dyn or None
     term_ok = False if collision else terminal_test(policy.terminal, ego_hist, np.array(speeds), dt, cfg, spec)
     out = M.compute(trace, cfg, terminal_ok=term_ok, road=spec["road"], dyn=dyn)
+    out["dyn_peaks"] = {"a_lat": float(np.max(a_lat)), "a_long_smoothed": float(np.max(np.abs(ax_s))), "a_comb": float(np.max(a_comb)),
+                         "dyn_margin": {n: float(np.min((lim - np.abs(ser)) / lim)) for n, ser, lim in (dyn or [])}}
+    goal = spec.get("route_goal")
+    route_done = None if goal is None else bool((not collision) and max(p[0] + states["ego"].hl for p in ego_hist) >= goal["x"])
 
     measured = None
     if brake_eff_t is not None:
@@ -138,7 +165,8 @@ def run_episode(plant, spec, policy, world, cfg=M.DEFAULT_V2, seed=0):
         measured = (idx[0] * dt - brake_eff_t) if idx else None
     return EpisodeResult(
         G=out["G"], G_search=out["G_search"], terminal_ok=bool(term_ok), termination=termination, invalid=invalid,
-        margin={k: v for k, v in out.items() if k in ("G_raw", "parts", "min_clearance_m")}, events=snap.events,
+        margin={k: v for k, v in out.items() if k in ("G_raw", "parts", "min_clearance_m", "dyn_peaks")}, events=snap.events,
+        route_goal_completed=route_done,
         ego=[(i * dt, *p, v) for i, (p, v) in enumerate(zip(ego_hist, speeds))],
         timestamps={"observations": feed.log[-3:], "commands": pipe.log, "brake_effective_t": brake_eff_t,
                     "measured_response_delay_s": measured, "configured_delay_s": d.get("obs", 0) + d.get("plan", 0) + d.get("act", 0)},
@@ -174,6 +202,7 @@ def evaluate(plant_factory, spec, library, worlds, theta, case_id, family_id, sp
             rn.append(res.G_search)
             tt.append(res.terminal_ok)
             runs[f"{p0.name}/{w['name']}"] = {"termination": res.termination, "events": res.events, "margin": res.margin,
+                                              "route_goal_completed": res.route_goal_completed,
                                               "timestamps": res.timestamps, "final": res.ego[-1]}
         R_raw.append(rr); R_norm.append(rn); T.append(tt)
         rec = ExecutionRecord(
@@ -181,9 +210,10 @@ def evaluate(plant_factory, spec, library, worlds, theta, case_id, family_id, sp
         policies=[p["name"] for p in descr], worlds=[w["name"] for w in worlds], R_raw=R_raw, R_norm=R_norm, terminal_ok=T,
         margin_config=dict(M.asdict(cfg)), evidence_scope=evidence_scope, seed=seed, policy_descriptors=descr,
         runtime=runtime or {}, physics_profile_id=physics_profile_id,
-        geometry={"spec": {k: spec[k] for k in ("ego", "actors", "road", "lane_w", "horizon_s", "delay", "a_lat_max") if k in spec}},
+        geometry={"spec": {k: spec[k] for k in ("ego", "actors", "road", "lane_w", "horizon_s", "delay", "a_lat_max", "a_comb_max", "route_goal") if k in spec}},
         timestamps={k: v["timestamps"] for k, v in runs.items()},
         events={k: {"termination": v["termination"], "events": v["events"]} for k, v in runs.items()},
-        traces={k: {"final": v["final"], "margin": v["margin"]} for k, v in runs.items()},
+        traces={k: {"final": v["final"], "margin": v["margin"], **({"route_goal_completed": v["route_goal_completed"]}
+                                                               if v["route_goal_completed"] is not None else {})} for k, v in runs.items()},
         invalid_reasons=invalid, parent_family_id=parent_family_id, varied_factor=varied_factor)
     return rec.finalize(cfg.eps)

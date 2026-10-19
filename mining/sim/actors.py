@@ -9,6 +9,7 @@ time or observed geometry, never re-drawn per tick.  Modes:
     yield           : cruise; once ego is alongside/ahead within trigger_gap, slow to v_yield after react_s
     nonyield        : explicit non-yielding (same as cruise, named so world sets are self-documenting)
     accelerate      : constant acceleration a
+trigger_t (optional, yield): start reacting at that sim time instead of the geometric trigger.
 Parameters ride in the world, e.g. {"adj": {"mode": "yield", "v_yield": 8.0, "react_s": 0.5}}.
 """
 from .trackers import SpeedPI, hold_lane_control
@@ -32,7 +33,10 @@ class ScriptedActor:
         elif m == "delayed_brake" and t >= self.p.get("t_brake", 0.0):
             self.v_ref = max(self.v_ref - self.p.get("b", 4.0) * self.dt, 0.0)
         elif m == "yield":
-            if self.t_trigger is None and ego.x > st.x - self.p.get("trigger_gap", 0.0) and abs(ego.lat - st.lat) < self.p.get("trigger_lat", 4.0):
+            if self.t_trigger is None and "trigger_t" in self.p:        # time-keyed yield (chosen per world)
+                if t >= self.p["trigger_t"]:
+                    self.t_trigger = t
+            elif self.t_trigger is None and ego.x > st.x - self.p.get("trigger_gap", 0.0) and abs(ego.lat - st.lat) < self.p.get("trigger_lat", 4.0):
                 self.t_trigger = t
             if self.t_trigger is not None and t >= self.t_trigger + self.p.get("react_s", 0.5):
                 self.v_ref = max(self.v_ref - self.p.get("b", 3.0) * self.dt, self.p.get("v_yield", 0.0))

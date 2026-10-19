@@ -161,3 +161,171 @@ class BypassThenReturn(Policy):
         if self.passed:
             return EgoCommand(long="keep", lat_target=0.0, lc_time=self.params["lc_time"])
         return EgoCommand(long="keep", lat_target=-ob.lane_w, lc_time=self.params["lc_time"])
+
+
+# ----------------------------------------------------------------------------- compositional cases (RC05, RC06, RC15, RC18)
+def _target_lane_objs(ob, behind_only=True):
+    """Anonymous objects seen in the left-neighbour lane band while the ego is still in its own lane (dlat in (-1.5, -0.5) lanes)."""
+    return [o for o in ob.objs if -1.5 * ob.lane_w < o["dlat"] < -0.5 * ob.lane_w and (o["dx"] < 0 or not behind_only)]
+
+
+class BrakeSteer(Policy):
+    """RC18: brake and steer AT THE SAME TIME (a combined brake-steer command; brake_frac of full brake)."""
+    terminal = "lane_follow"
+
+    def __init__(self, side=-1, lc_time=1.5, brake_frac=1.0, **kw):
+        super().__init__(side=side, lc_time=lc_time, brake_frac=brake_frac, **kw)
+        self.name = f"brake_steer_cmd_lc{lc_time:g}_b{brake_frac:g}"
+
+    def decide(self, history, t):
+        lane_w = history[-1].lane_w if history else 3.5
+        p = self.params
+        return EgoCommand(long="brake", brake_frac=p["brake_frac"], lat_target=p["side"] * lane_w, lc_time=p["lc_time"])
+
+
+class ImmediateEntry(Policy):
+    """RC06 / RC15: enter the left lane at once (no observation of the neighbour lane)."""
+    name, terminal = "immediate_entry", "lane_follow"
+
+    def __init__(self, lc_time=2.0, **kw):
+        super().__init__(lc_time=lc_time, **kw)
+
+    def decide(self, history, t):
+        lane_w = history[-1].lane_w if history else 3.5
+        return EgoCommand(long="keep", lat_target=-lane_w, lc_time=self.params["lc_time"])
+
+
+class AlwaysMerge(ImmediateEntry):
+    name = "always_merge"
+
+
+class WaitObserveEnter(Policy):
+    """RC06: yield to the vehicle passing in the target lane, then enter once the observed gap is usable.  While waiting the ego
+    keeps its speed (or brakes at wait_brake_frac > 0).  A target-lane object is blocking when it is behind by less than
+    hl_sum + back_m + back_t * closing_speed, or ahead by less than hl_sum + front_m.  Entry is latched."""
+    terminal = "lane_follow"
+
+    def __init__(self, lc_time=2.0, back_m=5.0, back_t=1.5, front_m=5.0, wait_brake_frac=0.0, **kw):
+        super().__init__(lc_time=lc_time, back_m=back_m, back_t=back_t, front_m=front_m, wait_brake_frac=wait_brake_frac, **kw)
+        self.name = "wait_observe_enter" if not wait_brake_frac else "wait_brake_observe_enter"
+
+    def reset(self):
+        super().reset(); self.entered = False
+
+    def _blocked(self, ob):
+        p = self.params
+        for o in _target_lane_objs(ob, behind_only=False):
+            hs = o["hl"] + 2.3
+            if o["dx"] < 0 and -o["dx"] < hs + p["back_m"] + p["back_t"] * max(o["dv"], 0.0):
+                return True
+            if o["dx"] >= 0 and o["dx"] < hs + p["front_m"]:
+                return True
+        return False
+
+    def decide(self, history, t):
+        ob = history[-1]
+        if not self.entered and not self._blocked(ob):
+            self.entered = True
+        if self.entered:
+            return EgoCommand(long="keep", lat_target=-ob.lane_w, lc_time=self.params["lc_time"])
+        if self.params["wait_brake_frac"]:
+            return EgoCommand(long="brake", brake_frac=self.params["wait_brake_frac"])
+        return EgoCommand(long="keep")
+
+
+class ObserveYieldElseFallback(Policy):
+    """RC15: merge left only after the neighbour's YIELD has been observed (its closing speed dv fell by `drop` m/s from the
+    largest value seen); if no yield is observed within `wait_s`, fall back to full braking in the lane.  Both latch.
+    The terminal test follows the branch taken (a stopped ego in its lane centre also satisfies lane_follow)."""
+    name = "observe_yield_else_fallback"
+
+    def __init__(self, lc_time=2.0, wait_s=2.0, drop=1.5, **kw):
+        super().__init__(lc_time=lc_time, wait_s=wait_s, drop=drop, **kw)
+
+    terminal = "lane_follow"
+
+    def reset(self):
+        super().reset(); self.dv_peak, self.merged, self.fell_back = None, False, False
+
+    def decide(self, history, t):
+        ob, s, p = history[-1], self._since(t), self.params
+        if not self.merged and not self.fell_back:
+            objs = _target_lane_objs(ob)
+            if objs:
+                dv = max(o["dv"] for o in objs)
+                self.dv_peak = dv if self.dv_peak is None else max(self.dv_peak, dv)
+                if dv <= self.dv_peak - p["drop"]:
+                    self.merged = True
+            if not self.merged and s >= p["wait_s"]:
+                self.fell_back = True
+        if self.merged:
+            return EgoCommand(long="keep", lat_target=-ob.lane_w, lc_time=p["lc_time"])
+        if self.fell_back:
+            return EgoCommand(long="brake")
+        return EgoCommand(long="keep")
+
+
+class LaneChangePrefix(Policy):
+    """RC05: the ego is DURING a lane change: for prefix_s it commands the left lane change (physically executed in the episode,
+    never a lateral teleport); `after` then decides.  Base class = commit (keep going)."""
+    name, terminal = "commit_lane_change", "lane_follow"
+
+    def __init__(self, prefix_s=1.0, lc_time=3.0, abort_lc=1.5, **kw):
+        super().__init__(prefix_s=prefix_s, lc_time=lc_time, abort_lc=abort_lc, **kw)
+
+    def _commit(self, ob):
+        return EgoCommand(long="keep", lat_target=-ob.lane_w, lc_time=self.params["lc_time"])
+
+    def _abort(self, t):
+        """Steer back to the original lane at the current speed, then brake once the return transition has settled (braking while
+        still steering leaves a residual yaw at standstill).  The abort start time is latched."""
+        if getattr(self, "t_abort", None) is None:
+            self.t_abort = t
+        if t - self.t_abort < self.params["abort_lc"] + self.params.get("settle_s", 0.3):
+            return EgoCommand(long="keep", lat_target=0.0, lc_time=self.params["abort_lc"])
+        return EgoCommand(long="brake", lat_target=0.0, lc_time=self.params["abort_lc"])
+
+    def after(self, history, t):
+        return self._commit(history[-1])
+
+    def decide(self, history, t):
+        if self._since(t) < self.params["prefix_s"]:
+            return self._commit(history[-1])
+        return self.after(history, t)
+
+
+class AbortAndStabilize(LaneChangePrefix):
+    """RC05: after the prefix, abort unconditionally: steer back to the original lane and brake."""
+    name = "abort_and_stabilize"
+
+    def reset(self):
+        super().reset(); self.t_abort = None
+
+    def after(self, history, t):
+        return self._abort(t)
+
+
+class AbortIfClosing(LaneChangePrefix):
+    """RC05 (observation-conditioned): keep changing lanes until a target-lane object behind the ego is seen closing with time to
+    contact below ttc_s, then abort (latched).  Sees only delivered observations."""
+    name = "abort_if_closing"
+
+    def __init__(self, ttc_s=4.0, **kw):
+        super().__init__(ttc_s=ttc_s, **kw)
+
+    def reset(self):
+        super().reset(); self.aborted = False; self.t_abort = None
+
+    def _closing(self, ob):
+        for o in ob.objs:
+            if o["dx"] < 0 and abs(o["dlat"]) <= 1.6 * ob.lane_w and o["dv"] > 0.5:
+                if (-o["dx"] - o["hl"] - 2.3) / o["dv"] < self.params["ttc_s"]:
+                    return True
+        return False
+
+    def decide(self, history, t):
+        if not self.aborted and self._closing(history[-1]):
+            self.aborted = True
+        if self.aborted:
+            return self._abort(t)
+        return self._commit(history[-1])
