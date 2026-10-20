@@ -1,4 +1,4 @@
-CARLA selftest 2026-10-19 06:44:47  map=Carla/Maps/OpenDriveMap  lane_w=3.50  physics_profile=pp_381b4c6e55
+CARLA selftest 2026-10-20 11:59:35  map=Carla/Maps/OpenDriveMap  lane_w=3.50  physics_profile=pp_381b4c6e55
 [PASS] keep holds speed: v0=11.87 v_end=11.87 max|dv|=0.18 m/s over 8.1 s
 [PASS] emergency brake decel within 10% of calibrated target (profile median): measured 9.07 m/s^2, target 8.98, v_start=20.17
 [PASS] emergency brake decel within 10% of calibrated target (nearest 6.0): measured 6.23 m/s^2, target 6.19, v_start=20.17
