@@ -67,8 +67,19 @@ def verdict(res, eps=0.0):
     return f"FAILS: margin G = {res.G:+.3f} (below 0)", RED
 
 
+def _fit(d, text, font, maxw):
+    """Shrink `font` (2 px at a time, floor 14) until `text` fits in maxw pixels; long case titles / policy names would run off the frame."""
+    try:
+        while d.textlength(text, font=font) > maxw and font.size > 14:
+            font = font.font_variant(size=font.size - 2)
+    except AttributeError:
+        pass
+    return font
+
+
 def _box(d, xy, text, font, fill=(255, 255, 255), bg=(0, 0, 0, 170), pad=10):
     x, y = xy
+    font = _fit(d, text, font, W - x - 2 * pad - 8)
     l, t, r, b = d.textbbox((x, y), text, font=font)
     d.rectangle((l - pad, t - pad, r + pad, b + pad), fill=bg)
     d.text((x, y), text, font=font, fill=fill)
@@ -80,6 +91,7 @@ def _card(base, lines):
     d = ImageDraw.Draw(im)
     y = 180
     for text, font, col in lines:
+        font = _fit(d, text, font, W - 160)
         d.text((80, y), text, font=font, fill=col)
         y += font.size + 24
     return np.asarray(im.convert("RGB"))
