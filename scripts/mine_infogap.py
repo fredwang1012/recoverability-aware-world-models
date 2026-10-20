@@ -55,6 +55,14 @@ def fnum(x, nd=3):
     return f"{x:.{nd}f}"
 
 
+def wall_text(wall):
+    """wall = (seconds, note) or None.  A regenerated md keeps the wall time recorded by the original run (wall.json), never the regeneration time."""
+    if wall is None:
+        return "wall time n/a (regenerated from the checkpointed records; no original timing was recorded)"
+    sec, note = wall
+    return f"wall {sec:.0f} s" + (f" ({note})" if note else "")
+
+
 def report(rows, args, ctx, budget, wall):
     algos = args.algos.split(",")
     L = [f"## D5 info-gap mining - backend: {ctx['backend'].upper()}"
@@ -64,7 +72,7 @@ def report(rows, args, ctx, budget, wall):
          f"V_hind >= eps (eps = 0); an info-gap scene is V_hind >= eps and V < eps.  Search algorithms see only the finite search signal "
          f"(cem: -(V_hind - V) from R_norm for feasible scenes, penalty otherwise; straddle/sobol: V_search from R_norm); labels, V, V_hind and the "
          f"objective come from the full record (R_raw, contract.classify).  When V = -inf the label-grade gap is +inf; those scenes are listed "
-         f"separately and never mixed with finite gaps.  {args.seeds} seed(s) x {budget} scenes per algorithm, batch {args.batch}; wall {wall:.0f} s.\n"]
+         f"separately and never mixed with finite gaps.  {args.seeds} seed(s) x {budget} scenes per algorithm, batch {args.batch}; {wall_text(wall)}.\n"]
     L += ["### Per algorithm\n", "| algo | scenes | distinct (D,v) | feasible (V_hind >= eps) | info-gap (V < eps) | of which V finite | of which V = -inf | "
           "R_REF | max finite gap | evidence mix |", "|---|---|---|---|---|---|---|---|---|---|"]
     for a in algos:
@@ -151,7 +159,17 @@ def main():
                 rows += [scene_row(g["rec"], eps) for g in got]
     except KeyboardInterrupt:
         print("interrupted; checkpoints kept", flush=True)
-    text = report(rows, args, ctx, args.budget, time.time() - t0)
+    import json
+    wall_path = f"{outdir}/wall.json"
+    if args.from_records:
+        wall = None
+        if os.path.exists(wall_path):
+            w = json.load(open(wall_path))
+            wall = (w["wall_s"], "recorded by the original run; md regenerated from the checkpoints. " + w.get("source", ""))
+    else:
+        wall = (time.time() - t0, "")
+        json.dump({"wall_s": wall[0], "source": f"this process, {args.algos}, {args.seeds} seed(s) x {args.budget}"}, open(wall_path, "w"))
+    text = report(rows, args, ctx, args.budget, wall)
     open(f"{outdir}/infogap.md", "w", encoding="utf-8", newline="\n").write(text)
     print(text)
 

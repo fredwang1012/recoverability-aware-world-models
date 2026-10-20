@@ -279,7 +279,7 @@ def export_records(root, out_dir, backend, families=SOURCE_FAMILIES):
     Plain scenes: duplicate scene ids (same family, case and theta from several algorithms) keep ONE row (the first source) and list every source
     file in `sources`; other measurements of the same theta are not merged (CARLA re-runs of one theta differ by the repeat spread).
     Pair members are NEVER dropped: they are keyed by (scene id, pair id, role), and a plain duplicate of a pair member's theta is the one that is
-    dropped.  Both members take the split group of the unrecoverable member.  The policy_library_id of a family is read from its plain records
+    dropped.  Split groups: each pair links the natural groups (family + non-distance factors) of its two members and linked groups are merged by union-find (splits.merge_groups), so every row of either member's natural group shares the pair's group.  The policy_library_id of a family is read from its plain records
     and applied to its pair rows."""
     os.makedirs(out_dir, exist_ok=True)
     items = collect_records(root, families)
@@ -287,10 +287,12 @@ def export_records(root, out_dir, backend, families=SOURCE_FAMILIES):
     for rec, pair, _ in items:
         if pair is None and rec.get("library_id"):
             lib_of.setdefault(rec["family_id"], rec["library_id"])
-    pair_group = {}
+    natural = lambda r: splits.split_group(r["family_id"], r["theta"])
+    members = {}
     for rec, pair, _ in items:
-        if pair is not None and pair["role"] == "unrecoverable":
-            pair_group[pair["pair_id"]] = splits.split_group(rec["family_id"], rec["theta"])
+        if pair is not None:
+            members.setdefault(pair["pair_id"], []).append(natural(rec))
+    assigned = splits.merge_groups({natural(r) for r, _, _ in items}, [(m[0], m[1]) for m in members.values() if len(m) == 2])
     rows, arrays, srcs, pair_sids = {}, {}, {}, {}
     for rec, pair, src in items:
         if rec["backend"] != backend:
@@ -306,7 +308,7 @@ def export_records(root, out_dir, backend, families=SOURCE_FAMILIES):
             continue                                   # plain duplicate of a pair member's theta: the pair row carries it
         if pair is not None:
             pair_sids.setdefault(sid, []).append(rid)
-        row = case_row(rec, pair, library_id=lib_of.get(rec["family_id"]), group=pair_group.get(pair["pair_id"]) if pair else None)
+        row = case_row(rec, pair, library_id=lib_of.get(rec["family_id"]), group=assigned[natural(rec)])
         rows[rid] = row
         arrays[f"{rid}/R"] = r_array(rec["R_raw"])
         arrays[f"{rid}/R_search"] = r_array(rec["R_norm"])

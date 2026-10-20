@@ -206,24 +206,24 @@ def check_e1(rec, root):
 
 def check_dataset(rows):
     """Cross-row checks on E1.1 rows (returns a list of messages):
-    1. rows of one family with the same non-distance factors share a split_group (non-pair rows; also equal to splits.split_group);
-    2. every pair_id has exactly one recoverable and one unrecoverable member, both in the same split_group, which is the group of at least one member;
-    3. within (backend, family): one policy_library_id and one policy_library_version."""
-    errs, by_key, pairs, libs = [], {}, {}, {}
+    1. all rows sharing a natural group (family + non-distance factors, splits.split_group), pair rows included, share ONE assigned split_group;
+    2. every pair_id has exactly one recoverable and one unrecoverable member, both in the same split_group;
+    3. the assigned groups are exactly the union-find merge of the natural groups linked by pairs (splits.merge_groups), so no counterfactual
+       neighbour of either pair member can sit in another split;
+    4. within (backend, family): one policy_library_id and one policy_library_version."""
+    errs, by_nat, pairs, libs = [], {}, {}, {}
+    rows = [r for r in rows if r.get("schema_version") == "E1.1"]
     for r in rows:
-        if r.get("schema_version") != "E1.1":
-            continue
-        want = splits.split_group(r["family_id"], r["theta"])
-        if r["pair_id"] is None:
-            if r["split_group"] != want:
-                errs.append(f"{r['id']}: split_group {r['split_group']!r} != non-distance-factor group {want!r}")
-            by_key.setdefault((r["backend"], want), set()).add(r["split_group"])
-        else:
-            pairs.setdefault(r["pair_id"], []).append((r["pair_role"], r["split_group"], want))
+        nat = splits.split_group(r["family_id"], r["theta"])
+        r_nat = (r["backend"], nat)
+        by_nat.setdefault(r_nat, set()).add(r["split_group"])
+        if r["pair_id"] is not None:
+            pairs.setdefault(r["pair_id"], []).append((r["pair_role"], r["split_group"], nat))
         libs.setdefault((r["backend"], r["family_id"]), set()).add((r["policy_library_id"], r["policy_library_version"]))
-    for k, g in by_key.items():
+    for k, g in by_nat.items():
         if len(g) > 1:
             errs.append(f"rows with the same non-distance factors {k} are in several split groups {sorted(g)}")
+    links = []
     for pid, ms in pairs.items():
         roles = sorted(m[0] for m in ms)
         if roles != ["recoverable", "unrecoverable"]:
@@ -231,8 +231,12 @@ def check_dataset(rows):
             continue
         if len({m[1] for m in ms}) != 1:
             errs.append(f"pair {pid}: members are in different split groups")
-        elif ms[0][1] not in {m[2] for m in ms}:
-            errs.append(f"pair {pid}: split group {ms[0][1]!r} is not the non-distance-factor group of either member")
+        links.append((ms[0][2], ms[1][2]))
+    want = splits.merge_groups({n for _, n in by_nat}, links)
+    for r in rows:
+        w = want[splits.split_group(r["family_id"], r["theta"])]
+        if r["split_group"] != w:
+            errs.append(f"{r['id']}: split_group {r['split_group']!r} != merged group {w!r} (non-distance-factor group, merged across matched pairs)")
     for k, v in libs.items():
         if len({x[0] for x in v}) > 1 or len({x[1] for x in v}) > 1:
             errs.append(f"{k}: several library ids/versions {sorted(v)}")

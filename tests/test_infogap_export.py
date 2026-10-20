@@ -313,22 +313,46 @@ def test_split_group_rules():
     assert SP.split_group("infogap", i) != SP.split_group("infogap", dict(i, v_mps=16.0))
 
 
-def test_pair_varying_a_nondistance_factor_stays_together(tmp_path, mock_scenes):
-    """A pair that varies speed has members with different non-distance factors; both take the unrecoverable member's group."""
+def test_pair_varying_a_nondistance_factor_merges_both_natural_groups(tmp_path, mock_scenes):
+    """A pair that varies speed links two natural groups; union-find merges them, so a plain row from EITHER member's natural group ends in the
+    pair's split group (the leak the first version had), while an unrelated speed keeps its own group."""
     th0, rec0 = mock_scenes[0]
     d = tmp_path / "mining" / "corridor"
     d.mkdir(parents=True)
-    a, b = rec0.to_json(), copy.deepcopy(rec0.to_json())
-    for m, v in ((a, 12.0), (b, 12.4)):
+
+    def with_(v, gap=None, pid=None):
+        m = copy.deepcopy(rec0.to_json())
         m["family_id"] = m["split_group"] = "corridor"
-        m["theta"] = {**m["theta"], "v_mps": v, "prefix_s": 0.0}
+        m["theta"] = {**m["theta"], "v_mps": v, "prefix_s": 0.0, **({"gap_m": gap} if gap else {})}
+        m["_algo"], m["_seed"] = "sobol", 0
+        return m
+    a, b = with_(12.0), with_(12.4)
     with open(d / "pairs_bisect_s0.jsonl", "w") as f:
         f.write(json.dumps({"pair_id": "cp", "varied": "v_mps", "unrecoverable_side": a, "recoverable_side": b}) + "\n")
+    plain = [with_(12.4, gap=25.0), with_(12.0, gap=27.0), with_(13.5, gap=20.0)]       # recoverable-side group, unrecoverable-side group, unrelated
+    with open(d / "records_sobol_s0.jsonl", "w") as f:
+        for m in plain:
+            f.write(json.dumps(m) + "\n")
     EX.export_records(str(tmp_path / "mining"), str(tmp_path / "ds"), "mock", families=("corridor",))
     rows = [json.loads(line) for line in open(tmp_path / "ds" / "scenes.jsonl")]
-    assert len(rows) == 2 and len({r["split_group"] for r in rows}) == 1
-    assert rows[0]["split_group"] == SP.split_group("corridor", a["theta"])
+    by_v = {}
+    for r in rows:
+        by_v.setdefault(r["theta"]["v_mps"], set()).add(r["split_group"])
+    merged = SP.split_group("corridor", a["theta"])
+    assert len(rows) == 5
+    assert by_v[12.0] == by_v[12.4] == {merged}                      # pair members and both neighbours share one group
+    assert by_v[13.5] == {SP.split_group("corridor", plain[2]["theta"])} != {merged}
     assert VD.check_dataset(rows) == []
+    # the validator rejects the old behaviour: the recoverable neighbour left in its natural group
+    bad = copy.deepcopy(rows)
+    next(r for r in bad if r["pair_id"] is None and r["theta"]["v_mps"] == 12.4)["split_group"] = SP.split_group("corridor", plain[0]["theta"])
+    assert VD.check_dataset(bad)
+
+
+def test_merge_groups_is_transitive_and_deterministic():
+    m = SP.merge_groups({"c", "b", "a", "z"}, [("c", "b"), ("b", "a")])
+    assert m == {"a": "a", "b": "a", "c": "a", "z": "z"}
+    assert SP.merge_groups({"c", "b", "a"}, [("a", "b"), ("c", "b")]) == {"a": "a", "b": "a", "c": "a"}
 
 
 def test_library_identity_is_family_level(tmp_path, mock_scenes):
@@ -360,3 +384,53 @@ def test_e1_fields_tied_to_required_and_every_required_field_is_checked(tmp_path
         z = copy.deepcopy(rows[0])
         del z[k]
         assert f"missing {k}" in VD.check(z, str(out)), k
+
+
+# ----------------------------------------------------------------------------- fix round 2: flag-table parse, wall time
+FIXTURE_MD = """## D5 info-gap mining - backend: CARLA
+
+### Per algorithm
+
+| algo | scenes | distinct (D,v) | feasible |
+|---|---|---|---|
+| cem | 18 | 18 | 13 |
+
+### Found info-gap scenes (best first)
+
+| algo | seed | D (m) | v (m/s) | t_reveal (s) | V | V_hind | V_hind - V | t* (s) | t_reveal - t* | D_stop (m) | evidence |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| cem | 1 | 26.8 | 17.1 | 0.7 | -0.083 | 0.105 | 0.188 | 0.488 | 0.21 | 29.67 | U_INFORMATION |
+| cem | 1 | 22.6 | 16.1 | 0.55 | -inf | 0.085 | inf | 0.174 | 0.38 | 26.70 | U_INFORMATION |
+
+Comparison text.
+
+### R_REF scenes after t* and below D_stop
+
+| algo | seed | D (m) | v (m/s) | t_reveal (s) | t* (s) | D_stop - D (m) | V | within 0.2 m of D_stop |
+|---|---|---|---|---|---|---|---|---|
+| straddle | 0 | 20.4 | 13.8 | 1.15 | 0.306 | 1.05 | 0.678 | no |
+"""
+
+
+def test_flag_rows_take_only_real_margins_from_the_found_scenes_table():
+    import build_carla_report as BR
+    sect = BR.found_scenes_section(FIXTURE_MD)
+    assert "R_REF scenes after" not in sect and "straddle" not in sect
+    rows = BR.infogap_flag_rows(FIXTURE_MD)
+    vals = sorted(m for _, m, _ in rows)
+    assert vals == [-0.083, 0.085, 0.105]                     # V of the finite scene, V_hind of both; V = -inf has no margin row
+    assert not any(abs(m) > 0.5 for m in vals)                # no distance or threshold values (1.05, 0.678, 0.306) leaked in
+
+
+def test_real_flag_rows_are_margins_only():
+    import build_carla_report as BR
+    rows = BR.flag_rows()
+    assert rows and all(abs(m) <= 0.7 for _, m, _ in rows)
+    d5 = [m for n, m, _ in rows if n.startswith("D5 CARLA")]
+    assert d5 and all(abs(m) < 0.5 for m in d5)
+
+
+def test_regenerated_md_keeps_recorded_wall_time():
+    import mine_infogap as MI
+    assert MI.wall_text((253.0, "recorded by the original run")) == "wall 253 s (recorded by the original run)"
+    assert "n/a" in MI.wall_text(None) and "wall 0 s" not in MI.wall_text(None)

@@ -10,8 +10,11 @@ negatives.md-listed values and core.md-listed values quoted in FLAGS (each with 
 import json
 import os
 import re
+import sys
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+sys.path.insert(0, os.path.join(ROOT, "mining"))
+import splits
 CARLA = os.path.join(ROOT, "mining", "results", "carla")
 MOCK = os.path.join(ROOT, "results", "mock")
 MAX_SPREAD = 0.028          # RC13 scene (14, 20, 0.2), witness world B 0.0224 .. 0.0504 (negatives.md); exceeds the Task 5 sigma 0.0167
@@ -72,6 +75,24 @@ def rc13_summary():
             f"because it applied sigma = 0.0167; at {MAX_SPREAD} the robust count is {len(robust)} of {len(rows)}.")
 
 
+def found_scenes_section(md):
+    """Only the 'Found info-gap scenes' table: from its heading to the next heading (the 'R_REF scenes after t*' table that follows holds distances and
+    thresholds, not margins)."""
+    i = md.index("### Found info-gap scenes")
+    j = md.find(chr(10) + "#", i + 3)
+    return md[i:] if j < 0 else md[i:j]
+
+
+def infogap_flag_rows(md):
+    rows = []
+    for m in re.finditer(r"^\| (cem|straddle) \| (\d+) \| ([\d.]+) \| ([\d.]+) \| ([\d.]+) \| (-inf|-?[\d.]+) \| (-?[\d.]+) \|", found_scenes_section(md), re.M):
+        algo, seed, D, v, tr, V, Vh = m.groups()
+        rows.append((f"D5 CARLA info-gap scene D {D}, v {v}, t_reveal {tr} ({algo} s{seed}): V_hind (hindsight witness)", float(Vh), "mining/infogap/infogap.md"))
+        if V != "-inf":
+            rows.append((f"D5 CARLA info-gap scene D {D}, v {v}, t_reveal {tr} ({algo} s{seed}): V (negative side)", float(V), "mining/infogap/infogap.md"))
+    return rows
+
+
 def flag_rows():
     rows = []
     for n, m in rc13_rows():
@@ -85,13 +106,7 @@ def flag_rows():
     k = rd(CARLA, "compositional.md")
     m = re.search(r"^\| 60 \| 20 \| 16 \| R_REF \| True \| immediate_entry=-inf; wait_observe_enter=([\d.]+);", k, re.M)
     rows.append(("RC06 named witness wait_observe_enter (scene 60/20/16; the scene also has wait_brake_observe_enter at 0.105, so the label stands)", float(m.group(1)), "compositional.md, RC06"))
-    ig = rd(CARLA, "mining", "infogap", "infogap.md")
-    ig = ig[ig.index("### Found info-gap scenes"):]
-    for m in re.finditer(r"^\| (cem|straddle) \| (\d+) \| ([\d.]+) \| ([\d.]+) \| ([\d.]+) \| (-inf|-?[\d.]+) \| (-?[\d.]+) \|", ig, re.M):
-        algo, seed, D, v, tr, V, Vh = m.groups()
-        rows.append((f"D5 CARLA info-gap scene D {D}, v {v}, t_reveal {tr} ({algo} s{seed}): V_hind (hindsight witness)", float(Vh), "mining/infogap/infogap.md"))
-        if V != "-inf":
-            rows.append((f"D5 CARLA info-gap scene D {D}, v {v}, t_reveal {tr} ({algo} s{seed}): V (negative side)", float(V), "mining/infogap/infogap.md"))
+    rows += infogap_flag_rows(rd(CARLA, "mining", "infogap", "infogap.md"))
     for v, D, t_, ev, pol in occ_rows():
         V = occ_v(pol)
         if ev == "R_REF" and 0 <= V < 2 * MAX_SPREAD:
@@ -174,7 +189,9 @@ def main():
     ds = {}
     for b, p in (("carla", os.path.join(CARLA, "dataset", "scenes.jsonl")), ("mock", os.path.join(MOCK, "dataset", "scenes.jsonl"))):
         rows = [json.loads(l) for l in open(p)]
-        ds[b] = {"n": len(rows), "hist": sum(r["history"] is not None for r in rows), "pair_rows": sum(r["pair_id"] is not None for r in rows), "pair_ids": len({r["pair_id"] for r in rows if r["pair_id"]}),
+        ds[b] = {"n": len(rows), "hist": sum(r["history"] is not None for r in rows), "groups_natural": {f: len({splits.split_group(r["family_id"], r["theta"]) for r in rows if r["family_id"] == f}) for f in sorted({r["family_id"] for r in rows})},
+                 "groups_after_merge": {f: len({r["split_group"] for r in rows if r["family_id"] == f}) for f in sorted({r["family_id"] for r in rows})},
+                 "pair_rows": sum(r["pair_id"] is not None for r in rows), "pair_ids": len({r["pair_id"] for r in rows if r["pair_id"]}),
                  "pair_ids_complete": sum(sorted(x) == ["recoverable", "unrecoverable"] for x in _roles(rows).values()),
                  "fam": {f: sum(r["family_id"] == f for r in rows) for f in sorted({r["family_id"] for r in rows})},
                  "ev": {e: sum(r["evidence"] == e for r in rows) for e in sorted({r["evidence"] for r in rows})},

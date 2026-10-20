@@ -49,7 +49,7 @@ PASS = criterion met as stated; WARN = met with a caveat listed in section 7; NO
 | 8 | RC09 (25-member class refuted), RC13 | WARN | `negatives.md`; two headline margins inside the observed repeat spread |
 | 9 | D5 info-gap mining: mock | PASS | `results/mock/mining/infogap/infogap.md` |
 | 9 | D5 info-gap mining: CARLA | WARN | `mining/results/carla/mining/infogap/infogap.md`: only 36 scenes; all 6 hits come from seed 1; 4 of 6 hits have V = -inf; one hit (V_hind 0.002) is inside the repeat spread; the search ranks on a graded search signal that favours collision severity (section 5) |
-| 9 | E1 export + `validate_dataset.py`, mock and CARLA | WARN | section 6: validators pass (0 invalid on both), but `history` is null in 1336 of 1372 CARLA rows (only the 36 infogap rows have it), mock `physics_profile` is null by design, and pair rows join the group of the unrecoverable member |
+| 9 | E1 export + `validate_dataset.py`, mock and CARLA | WARN | section 6: validators pass (0 invalid on both), but `history` is null in 1336 of 1372 CARLA rows (only the 36 infogap rows have it), mock `physics_profile` is null by design, and pair rows are merged into the split group of both members' neighbourhoods (union-find) |
 | 9 | Cosmos appearance variants | NOT EXECUTED | none exist; `parent_id` and `variant_kind` are null in every row |
 
 ## 3. Tables
@@ -297,7 +297,7 @@ Info-gap scene = V_hind >= eps and V < eps. Family = RC10/RC11 with theta = (D, 
 
 ### D5 info-gap mining - backend: MOCK (MOCK plant: kinematic stand-in, NOT CARLA)
 
-Family: RC10/RC11 (`cases/occlusion`), theta = (D, v, t_reveal) in D [14, 34] m, v [12, 18] m/s, t_reveal [0, 1.2] s on the 0.05 s tick grid (D to 0.1 m, v to 0.1 m/s).  Objective: maximise V_hind - V subject to V_hind >= eps (eps = 0); an info-gap scene is V_hind >= eps and V < eps.  Search algorithms see only the finite search signal (cem: -(V_hind - V) from R_norm for feasible scenes, penalty otherwise; straddle/sobol: V_search from R_norm); labels, V, V_hind and the objective come from the full record (R_raw, contract.classify).  When V = -inf the label-grade gap is +inf; those scenes are listed separately and never mixed with finite gaps.  2 seed(s) x 24 scenes per algorithm, batch 3; wall 1 s.
+Family: RC10/RC11 (`cases/occlusion`), theta = (D, v, t_reveal) in D [14, 34] m, v [12, 18] m/s, t_reveal [0, 1.2] s on the 0.05 s tick grid (D to 0.1 m, v to 0.1 m/s).  Objective: maximise V_hind - V subject to V_hind >= eps (eps = 0); an info-gap scene is V_hind >= eps and V < eps.  Search algorithms see only the finite search signal (cem: -(V_hind - V) from R_norm for feasible scenes, penalty otherwise; straddle/sobol: V_search from R_norm); labels, V, V_hind and the objective come from the full record (R_raw, contract.classify).  When V = -inf the label-grade gap is +inf; those scenes are listed separately and never mixed with finite gaps.  2 seed(s) x 24 scenes per algorithm, batch 3; wall 265 s (recorded by the original run; md regenerated from the checkpoints. Original mock run (results/mock/mining/infogap_run.log, 24 scenes x 2 seeds x 3 algorithms).).
 
 ### Per algorithm
 
@@ -383,7 +383,7 @@ Scenes labelled U_INFORMATION that are not info-gap by the objective: 0 (must be
 
 ### D5 info-gap mining - backend: CARLA
 
-Family: RC10/RC11 (`cases/occlusion`), theta = (D, v, t_reveal) in D [14, 34] m, v [12, 18] m/s, t_reveal [0, 1.2] s on the 0.05 s tick grid (D to 0.1 m, v to 0.1 m/s).  Objective: maximise V_hind - V subject to V_hind >= eps (eps = 0); an info-gap scene is V_hind >= eps and V < eps.  Search algorithms see only the finite search signal (cem: -(V_hind - V) from R_norm for feasible scenes, penalty otherwise; straddle/sobol: V_search from R_norm); labels, V, V_hind and the objective come from the full record (R_raw, contract.classify).  When V = -inf the label-grade gap is +inf; those scenes are listed separately and never mixed with finite gaps.  2 seed(s) x 9 scenes per algorithm, batch 3; wall 0 s.
+Family: RC10/RC11 (`cases/occlusion`), theta = (D, v, t_reveal) in D [14, 34] m, v [12, 18] m/s, t_reveal [0, 1.2] s on the 0.05 s tick grid (D to 0.1 m, v to 0.1 m/s).  Objective: maximise V_hind - V subject to V_hind >= eps (eps = 0); an info-gap scene is V_hind >= eps and V < eps.  Search algorithms see only the finite search signal (cem: -(V_hind - V) from R_norm for feasible scenes, penalty otherwise; straddle/sobol: V_search from R_norm); labels, V, V_hind and the objective come from the full record (R_raw, contract.classify).  When V = -inf the label-grade gap is +inf; those scenes are listed separately and never mixed with finite gaps.  2 seed(s) x 9 scenes per algorithm, batch 3; wall 253 s (recorded by the original run; md regenerated from the checkpoints. Original CARLA run (log mining/results/carla/mining_infogap_run.log, md of commit ed3087e).).
 
 ### Per algorithm
 
@@ -439,6 +439,16 @@ Dataset summary (computed from the exported files; `size` in bytes of scenes.jso
  "carla": {
   "n": 1372,
   "hist": 36,
+  "groups_natural": {
+   "corridor": 613,
+   "infogap": 7,
+   "rc03": 571
+  },
+  "groups_after_merge": {
+   "corridor": 606,
+   "infogap": 7,
+   "rc03": 563
+  },
   "pair_rows": 74,
   "pair_ids": 37,
   "pair_ids_complete": 37,
@@ -455,11 +465,19 @@ Dataset summary (computed from the exported files; `size` in bytes of scenes.jso
   "pp": [
    "pp_381b4c6e55"
   ],
-  "size": 5565703
+  "size": 5565659
  },
  "mock": {
   "n": 454,
   "hist": 164,
+  "groups_natural": {
+   "corridor": 268,
+   "infogap": 7
+  },
+  "groups_after_merge": {
+   "corridor": 259,
+   "infogap": 7
+  },
   "pair_rows": 20,
   "pair_ids": 10,
   "pair_ids_complete": 10,
@@ -475,12 +493,12 @@ Dataset summary (computed from the exported files; `size` in bytes of scenes.jso
   "pp": [
    "None"
   ],
-  "size": 12854145
+  "size": 12854125
  }
 }
 ```
 
-Split groups (`mining/splits.py`; the controller ruling): corridor and rc03 rows are grouped by family plus every non-distance theta factor, so all gap neighbours of a scene share a group; infogap rows are grouped by speed bin (width 1.0 m/s), so every D and t_reveal at that speed stay together. A pair that varies a non-distance factor takes the group of its unrecoverable member for both members. `validate_dataset.py` checks across rows that rows with the same family and non-distance factors share a group, that every pair id has exactly one recoverable and one unrecoverable member in one group, and that each (backend, family) has one `policy_library_id` and one `policy_library_version`.
+Split groups (`mining/splits.py`; the controller ruling): the natural group of a row is its family plus every non-distance theta factor for corridor and rc03 (all gap neighbours together), and the speed bin of width 1.0 m/s for infogap (every D and t_reveal at that speed together). A matched pair that varies a non-distance factor links the natural groups of its two members; linked groups are merged with union-find and every row of the merged component, pair rows and plain rows, gets the lexicographically smallest natural group id of the component. So both members of a pair, and every neighbour of either member, share one split. The first version assigned both members the unrecoverable member's group and left plain rows of the recoverable member's natural group in another split; that leak is closed. Group counts before the merge (natural) and after it are in the dataset summary below (`groups_natural`, `groups_after_merge`). `validate_dataset.py` checks across rows that all rows sharing a natural group share one assigned group, that every pair id has exactly one recoverable and one unrecoverable member in one group, that the assigned groups equal the union-find merge, and that each (backend, family) has one `policy_library_id` and one `policy_library_version`.
 
 Pairs: pair members are keyed by (scene id, pair id, role) and never dropped by deduplication; a plain scene with the same theta as a pair member is the row that is dropped (its source file stays listed). An earlier export keyed rows by scene id alone and left 8 of 31 CARLA pair ids with a single role; the corrected CARLA export has 37 pair ids (the pairs files; pairs.md lists 31 distinct ones) with 74 rows, all complete. The mock export has 10 pair ids and 20 rows.
 
@@ -511,12 +529,6 @@ Locations: CARLA `mining/results/carla/dataset/`; mock `results/mock/dataset/` (
 | D5 CARLA info-gap scene D 23.9, v 17.2, t_reveal 1.05 (straddle s1): V_hind (hindsight witness) | +0.0630 | no | mining/infogap/infogap.md |
 | D5 CARLA info-gap scene D 24.4, v 17.6, t_reveal 0.5 (straddle s1): V_hind (hindsight witness) | +0.0550 | no | mining/infogap/infogap.md |
 | D5 CARLA info-gap scene D 20.8, v 16, t_reveal 0.75 (cem s1): V_hind (hindsight witness) | +0.0020 | **yes** | mining/infogap/infogap.md |
-| D5 CARLA info-gap scene D 20.4, v 13.8, t_reveal 1.15 (straddle s0): V_hind (hindsight witness) | +0.0700 | no | mining/infogap/infogap.md |
-| D5 CARLA info-gap scene D 20.4, v 13.8, t_reveal 1.15 (straddle s0): V (negative side) | +0.3060 | no | mining/infogap/infogap.md |
-| D5 CARLA info-gap scene D 26.8, v 16.2, t_reveal 0.9 (straddle s1): V_hind (hindsight witness) | +0.1900 | no | mining/infogap/infogap.md |
-| D5 CARLA info-gap scene D 26.8, v 16.2, t_reveal 0.9 (straddle s1): V (negative side) | +0.6780 | no | mining/infogap/infogap.md |
-| D5 CARLA info-gap scene D 24.5, v 15.7, t_reveal 0.5 (cem s1): V_hind (hindsight witness) | +1.0500 | no | mining/infogap/infogap.md |
-| D5 CARLA info-gap scene D 24.5, v 15.7, t_reveal 0.5 (cem s1): V (negative side) | +0.4900 | no | mining/infogap/infogap.md |
 | Task 7 sweep v 14, D 18, t_reveal 0: R_REF, V | +0.0250 | **yes** | occlusion.md, full margins |
 | Task 7 sweep v 14, D 18, t_reveal 0.1: U_INFORMATION, V (transition bracket edge) | -0.0420 | no | occlusion.md, full margins |
 | Task 7 sweep v 14, D 19, t_reveal 0.1: R_REF, V | +0.0490 | no | occlusion.md, full margins |
@@ -528,7 +540,7 @@ Locations: CARLA `mining/results/carla/dataset/`; mock `results/mock/dataset/` (
 | Task 7 sweep v 18, D 28, t_reveal 0.4: R_REF, V | +0.0480 | no | occlusion.md, full margins |
 | Task 7 sweep v 18, D 30, t_reveal 0.8: R_REF, V | +0.0090 | **yes** | occlusion.md, full margins |
 
-10 of the 31 listed margins are inside the spread. (Rows with margins up to twice the spread are listed so the reader can see how close the others are.)
+10 of the 25 listed margins are inside the spread. (Rows with margins up to twice the spread are listed so the reader can see how close the others are.)
 
 CARLA is not bit-reproducible: a minority of repeated scenes (23 of 109 repeated scenes (about 21%) showed spread in some repeat: 9 of 32 corridor and 14 of 77 rc03 rows) show a changed value within a session (sigma 0.0833 m in the corridor units); same-server determinism cases were exact, and cross-session repeats were not measured systematically (the RC12 spread check of 10 scenes of one family is mostly saturated and proves nothing about cross-session spread).
 
