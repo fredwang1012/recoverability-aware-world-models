@@ -434,3 +434,15 @@ def test_regenerated_md_keeps_recorded_wall_time():
     import mine_infogap as MI
     assert MI.wall_text((253.0, "recorded by the original run")) == "wall 253 s (recorded by the original run)"
     assert "n/a" in MI.wall_text(None) and "wall 0 s" not in MI.wall_text(None)
+
+
+def test_wall_note_has_no_doubled_full_stop():
+    import mine_infogap as MI
+    t = MI.wall_text((253.0, "recorded by the original run. Original run (log x, md of commit abc)."))
+    assert ".)." not in t and t.endswith("abc))") and t.startswith("wall 253 s (")
+    assert MI.wall_text((5.0, "")) == "wall 5 s" and MI.wall_text((5.0, " . ")) == "wall 5 s"
+
+
+def test_splits_docstring_describes_union_find():
+    doc = SP.__doc__
+    assert "union-find" in doc and "UNRECOVERABLE" not in doc

@@ -60,7 +60,7 @@ def wall_text(wall):
     if wall is None:
         return "wall time n/a (regenerated from the checkpointed records; no original timing was recorded)"
     sec, note = wall
-    return f"wall {sec:.0f} s" + (f" ({note})" if note else "")
+    return f"wall {sec:.0f} s" + (f" ({note.strip().rstrip('.').strip()})" if note and note.strip().strip(".") else "")
 
 
 def report(rows, args, ctx, budget, wall):

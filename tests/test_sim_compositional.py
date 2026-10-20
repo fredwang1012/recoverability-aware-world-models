@@ -174,5 +174,5 @@ def test_harness_spec_a_comb_vmin_override_changes_the_margin():
         sp = dict(CP.rc18_spec(th, CFG, comb=True), a_comb_vmin=vmin)
         res = H.run_episode(KinematicPlant(b_max=9.0), sp, P.BrakeHold(), CP.CLEAN, CFG)
         out[vmin] = res.margin["parts"]["dyn"]
-    assert out[0.0] < 0.0 <= out[50.0] or out[0.0] < out[50.0]       # vmin=0 counts the 9 m/s^2 braking (> 8); vmin=50 excludes every tick
+    assert out[0.0] < 0.0 <= out[50.0]       # vmin=0 counts the 9 m/s^2 braking (> 8); vmin=50 excludes every tick
     assert out[50.0] > out[0.0]

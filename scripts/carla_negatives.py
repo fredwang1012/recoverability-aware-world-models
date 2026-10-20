@@ -343,6 +343,7 @@ def report(ctx, r09, dec, r13):
     L = []
     w = L.append
     w("# CARLA difficult negatives (Task 8: RC09, RC13)\n")
+    w("> **Superseded claim.** The RC13 \"4 of 4 robust\" headline below uses the Task 5 sigma 0.0167; at the maximum observed repeat spread 0.028 it is 2 of 4 (see `docs/carla_results.md` section 7, Repeatability).\n")
     w(f"Physics profile `{ctx.pid}`, decel target {CC.DECEL_TARGET}, eps = {CFG.eps}, reserve c = {CFG.reserve_m} m (margin.DEFAULT_V2, unchanged), act delay {TAU} s, "
       f"`a_lat_max = {NG.A_LAT_MAX:g}` m/s^2 (dynamic-limit margin). Records: `results/carla/negatives/*.jsonl`. Labels are `contract.classify` output only; G cells read one value per world "
       "(-inf = hard failure, None = unrun). Mock and CARLA outputs are kept apart.\n")

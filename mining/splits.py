@@ -4,7 +4,9 @@ splits.py - E1 split groups (controller ruling, Task 9 fix round 1).  Counterfac
     corridor / rc03 (and any family with a bumper-gap axis): group = family + every NON-distance theta factor.  All gap (distance) neighbours of a
         scene share one group.
     infogap: group = family + the speed bin of width INFOGAP_V_BIN (all D and all t_reveal at that speed together).
-A matched pair varies ONE factor; both members take the group of the UNRECOVERABLE member (so a pair that varies speed is not split).
+A matched pair varies ONE factor, so its two members can have different natural groups.  merge_groups() runs union-find over the natural groups with one
+link per matched pair; every natural group in a connected component is assigned the lexicographically smallest natural id of the component, so a pair
+(and every row of either member's natural group) always lands in one split group.
 """
 import math
 
