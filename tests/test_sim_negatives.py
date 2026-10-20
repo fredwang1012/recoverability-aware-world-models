@@ -1,10 +1,11 @@
 """Difficult negatives (RC09, RC13) through the harness on the KINEMATIC MOCK plant, plus the pure predictor / counterexample helpers.
 Not a CARLA result.  Labels by evidence only."""
-import inspect
 import json
 import math
 import os
 import sys
+
+import pytest
 
 import margin as M
 import validate_records as VR
@@ -30,6 +31,12 @@ def run9(th=TH, **kw):
     return rec
 
 
+@pytest.fixture(scope="module")
+def base_rec():
+    """The default RC09 mock record, run once for the module."""
+    return run9()
+
+
 def rows(rec):
     return {p: rec.R_raw[i][0] for i, p in enumerate(rec.policies)}
 
@@ -44,8 +51,8 @@ def test_rc09_class_is_exactly_the_declared_finite_set():
     assert byname["brake_frac_0.3"]["params"]["brake_frac"] == 0.3 and byname["bypass_left_lc1"]["params"]["lc_time"] == 1.0
 
 
-def test_rc09_every_member_refuted_with_a_counterexample():
-    rec = run9()
+def test_rc09_every_member_refuted_with_a_counterexample(base_rec):
+    rec = base_rec
     assert rec.evidence_class == "U_LIBRARY"
     ce = NG.counterexamples(rec)
     assert set(ce) == {m["name"] for m in NG.rc09_members()}
@@ -75,8 +82,8 @@ def test_rc09_scene_geometry():
     assert sp["a_lat_max"] == 8.0
 
 
-def test_counterexamples_follow_the_record_numbers_not_intent():
-    r = json.loads(json.dumps(run9().to_json()))
+def test_counterexamples_follow_the_record_numbers_not_intent(base_rec):
+    r = json.loads(json.dumps(base_rec.to_json()))
     r["R_raw"][3][0] = 0.5
     assert NG.counterexamples(r)[r["policies"][3]]["refuted"] is False
 
@@ -127,9 +134,45 @@ def test_predictor_growth_and_resolution_are_parameters():
 
 
 def test_predictor_input_is_an_anonymous_observation():
+    """Behavioural: the object fields are only the anonymous ones, and the same Obs gives identical output whatever world produced it."""
     assert set(obs_hid(1, 0).objs[0]) == {"dx", "dlat", "dv", "hl", "hw"}
-    src = inspect.getsource(NG.action_rejected)
-    assert "world" not in src and "spawn" not in src and "name" not in src
+    ob_a, ob_b = obs_hid(22.2, 0.0), obs_hid(22.2, 0.0)          # 'from world A' and 'from world B': the same delivered frame
+    env = NG.Envelope(lat_m=0.5, lon_m=0.5)
+    for act in ("stay", "change_left"):
+        assert NG.action_rejected(ob_a, act, env) == NG.action_rejected(ob_b, act, env)
+    # an extra, non-anonymous field on the object is ignored (the result depends only on the anonymous fields)
+    tagged = Obs(0.0, 0.0, 14.0, 3.5, [dict(ob_a.objs[0], world="hid_own_lane", name="hid")], 2.3)
+    assert NG.action_rejected(tagged, "change_left", env) == NG.action_rejected(ob_a, "change_left", env)
+
+
+def test_exact_envelope_at_the_evidence_reserve_rejects_a_witness_with_small_box_separation():
+    own = obs_hid(22.2, 0.0)
+    sep = NG.action_rejected(own, "change_left", NG.Envelope())[1]
+    assert sep > 0 and not NG.action_rejected(own, "change_left", NG.Envelope())[0]
+    assert NG.action_rejected(own, "change_left", NG.Envelope(clearance_m=sep + 0.01))[0]      # a clearance above the nominal separation closes it
+
+
+def test_repeat_status_marginal_rule():
+    eps, sg = 0.0, 0.0167
+    assert CN.repeat_status([0.105, 0.110, 0.100], eps, sg)[1] is False
+    assert CN.repeat_status([0.018, 0.012, 0.030], eps, sg)[1] is True                           # one repeat within sigma of eps
+    r, marg, flips = CN.repeat_status([0.030, -0.005, 0.02], eps, sg)
+    assert marg and flips and r == (-0.005, 0.030)
+    assert CN.repeat_status([-math.inf, -math.inf], eps, sg)[1] is False                         # consistently refuted is not marginal
+    assert CN.repeat_status([0.05, None], eps, sg)[1] is True
+
+
+def test_scene_robust_uses_both_worlds_and_evidence_class():
+    def rec(ga, gb, ev="R_REF"):
+        return {"evidence_class": ev, "policies": ["shared_slowdown_then_branch"], "R_raw": [[ga, gb]]}
+    assert CN.scene_robust([rec(0.1, 0.05), rec(0.1, 0.06)])[0]
+    assert not CN.scene_robust([rec(0.1, 0.05), rec(0.1, 0.012)])[0]
+    assert not CN.scene_robust([rec(0.1, 0.05), rec(0.1, 0.05, "U_INFORMATION")])[0]
+
+
+def test_script_takes_dt_from_the_types_module():
+    import sim.types as T
+    assert CN.DT == T.DT == 0.05
 
 
 def test_recording_wrapper_is_transparent_and_captures_the_first_object_frame():

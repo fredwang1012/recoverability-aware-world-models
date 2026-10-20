@@ -95,6 +95,11 @@ Grouped by what refutes the member: **blk**: 9; **rear**: 8; **adj3**: 4; **adj4
 - no contact (G < eps from clearance/terminal/dynamic limit): `bypass_right_lc2`
 - adj2: `brake_steer_left_lc1_b0.5`, `brake_steer_left_lc1_b1`
 
+**Gentle braking is dominated.** Lower brake fractions do not help (measured decel is about 4 to 5 m/s^2 for f <= 0.6 on this plant, see the decel table; there is no 1-3 m/s^2 level): the constant-brake members that hit the blocker are ['brake_frac_0.0', 'brake_frac_0.1', 'brake_frac_0.2', 'brake_frac_0.3'] (contact at [2.2, 2.25, 2.3, 2.35] s), and every member that stops short is hit from behind. Lower deceleration arrives at the blocker with speed; higher deceleration stops short and is overtaken by the rear vehicle.
+
+**The in-lane refutation is structural.** Given a rear vehicle that never reacts and a blocker that never moves, a vehicle confined to its lane is struck by one of them whatever speed profile it follows (either it is not stopped before the blocker, or it is stopped and overtaken). The class-wide refutation of the in-lane members is therefore a consequence of the construction (declared world, blocked left lane, road edge on the right), not an empirical discovery. The empirical content is that the lane-change members, which are not structurally excluded, are also refuted (queue contact before the manoeuvre completes) and that the refutations were realised on CARLA with the calibrated plant.
+
+
 ### Controls (v 14, gap 23, same class)
 
 Each control removes one element of the scene to show what closes it. These are separate records and are not part of the RC09 label.
@@ -103,6 +108,9 @@ Each control removes one element of the scene to show what closes it. These are 
 |---|---|---|---|
 | no rear vehicle (left queue present) | R_REF | ['brake_frac_0.6', 'brake_frac_0.7', 'brake_frac_0.8', 'brake_frac_0.9', 'brake_frac_1.0', 'brake_0.6_for_2s_then_keep'] | keep_speed=-inf; accelerate=-inf; brake_frac_0.0=-inf; brake_frac_0.1=-inf; brake_frac_0.2=-inf; brake_frac_0.3=-inf; brake_frac_0.4=-0.132; brake_frac_0.5=-0.006; brake_frac_0.6=0.104; brake_frac_0.7=0.104; brake_frac_0.8=0.104; brake_frac_0.9=0.104; brake_frac_1.0=0.104; brake_0.3_for_1s_then_keep=-inf; brake_0.3_for_2s_then_keep=-inf; brake_0.6_for_1s_then_keep=-inf; brake_0.6_for_2s_then_keep=0.104; bypass_left_lc1=-inf; bypass_left_lc2=-inf; bypass_right_lc2=-inf; brake_steer_left_lc1_b0.5=-inf; brake_steer_left_lc1_b1=-inf; brake_steer_left_lc2_b0.5=-inf; brake_steer_left_lc2_b1=-inf; staged_brake_0.4_change_lc1=-inf |
 | left lane open (rear vehicle present) | R_REF | ['bypass_left_lc2'] | keep_speed=-inf; accelerate=-inf; brake_frac_0.0=-inf; brake_frac_0.1=-inf; brake_frac_0.2=-inf; brake_frac_0.3=-inf; brake_frac_0.4=-inf; brake_frac_0.5=-inf; brake_frac_0.6=-inf; brake_frac_0.7=-inf; brake_frac_0.8=-inf; brake_frac_0.9=-inf; brake_frac_1.0=-inf; brake_0.3_for_1s_then_keep=-inf; brake_0.3_for_2s_then_keep=-inf; brake_0.6_for_1s_then_keep=-inf; brake_0.6_for_2s_then_keep=-inf; bypass_left_lc1=-0.840; bypass_left_lc2=0.022; bypass_right_lc2=-inf; brake_steer_left_lc1_b0.5=-inf; brake_steer_left_lc1_b1=-inf; brake_steer_left_lc2_b0.5=-inf; brake_steer_left_lc2_b1=-inf; staged_brake_0.4_change_lc1=-0.691 |
+
+**Open-left control, repeatability.** The only witness is `bypass_left_lc2`; its margin over the original run and 3 repeats of the whole record: [0.0222, 0.0222, 0.0222, 0.0222] (range 0.0222 .. 0.0222; evidence classes ['R_REF', 'R_REF', 'R_REF', 'R_REF']). Under sigma = 0.0167: **robust**. 
+
 
 ### Brake fraction -> measured deceleration
 
@@ -128,7 +136,7 @@ The mapping is nonlinear: the low levels are dominated by an engine-drag floor, 
 
 **Predictor** (`cases/negatives.py: Envelope, action_rejected`). It is a plain function of one delivered observation and one action; it is NOT part of the evidence pipeline (it never produces a margin or a label, and the harness does not call it). For each object `o` of the observation: constant-velocity prediction `x_o(t) = dx + (v_ego + dv) t`, no lateral motion; its box half-extents are `hl + lon_m + growth_mps * t` and `hw + lat_m + growth_mps * t`. The action's nominal ego footprint (ego half length from the observation, half width 0.95 m): speed held for tau = 0.3 s, then brake at b = 6.211 m/s^2 (`stay`: to a stop; `change_left`: until v < 8 m/s, then hold) with the quintic lateral move of 2 s over one lane width for `change_left`. The action is **rejected** if at any look-ahead step (horizon 4 s) the box separation (max of the longitudinal and lateral gaps; negative = overlap) between the ego footprint and an inflated box is below `clearance_m` = 0.
 
-**Parameters.** E0: lat 0, lon 0, growth 0/s, dt 0.1 s; E1: lat 0.5, lon 0.5, growth 0/s, dt 0.1 s; E2: lat 1, lon 1, growth 0/s, dt 0.1 s; E3: lat 1.5, lon 1.5, growth 0/s, dt 0.1 s; E4: lat 2, lon 2, growth 0/s, dt 0.1 s; E5: lat 0.5, lon 0.5, growth 0.25/s, dt 0.1 s; E6: lat 0.5, lon 0.5, growth 0.5/s, dt 0.1 s; E7: lat 0, lon 0, growth 0/s, dt 0.5 s; E8: lat 1, lon 1, growth 0/s, dt 0.5 s. Horizon 4 s, clearance 0 for all.
+**Parameters.** E0: lat 0, lon 0, growth 0/s, dt 0.1 s; E1: lat 0.5, lon 0.5, growth 0/s, dt 0.1 s; E2: lat 1, lon 1, growth 0/s, dt 0.1 s; E3: lat 1.5, lon 1.5, growth 0/s, dt 0.1 s; E4: lat 2, lon 2, growth 0/s, dt 0.1 s; E5: lat 0.5, lon 0.5, growth 0.25/s, dt 0.1 s; E6: lat 0.5, lon 0.5, growth 0.5/s, dt 0.1 s; E7: lat 0, lon 0, growth 0/s, dt 0.5 s; E8: lat 1, lon 1, growth 0/s, dt 0.5 s; E9: lat 0, lon 0, growth 0/s, dt 0.1 s; E10: lat 0.5, lon 0.5, growth 0/s, dt 0.1 s. Horizon 4 s, clearance 0 for all.
 
 **Coherent worlds** are the declared world set of the construction: `hid_left_lane` and `hid_own_lane` (one stopped vehicle, in the left lane or in the ego lane; the feed delivers it from t_reveal). The predictor sees only the first delivered observation containing the vehicle (recorded from the CARLA run of the witness `shared_slowdown_then_branch`), never the world name; a world the predictor 'imagines' (e.g. a vehicle in both lanes) is not in the set and plays no role.
 
@@ -156,6 +164,8 @@ Each cell below compares the predictor's decision with the evidence for the same
 | E6 | 2/4 | [('hid_left_lane', 'stay'), ('hid_own_lane', 'change_left')] | none | -0.84 / -0.47 |
 | E7 | 4/4 | none | none | 1.66 / 0.89 |
 | E8 | 3/4 | [('hid_own_lane', 'change_left')] | none | 0.66 / -0.11 |
+| E9 | 3/4 | [('hid_own_lane', 'change_left')] | none | 1.66 / 0.83 |
+| E10 | 3/4 | [('hid_own_lane', 'change_left')] | none | 1.16 / 0.33 |
 
 Smallest uniform inflation (lat = lon, no growth, dt 0.1 s, grid 0.05 m) that rejects the witness branch: {'hid_left_lane': 1.7, 'hid_own_lane': 0.85}.
 Audited witness trace in `hid_own_lane` (r = 0.049): termination horizon, contact events none, ego v 14.01 -> 6.72, lateral range [-3.84, -0.00], min clearance (m) {'hid': 1.25}; commands (decision -> effective): brake/None 0.00->0.25, brake/-3.5 0.10->0.35, keep/-3.5 1.35->1.60.
@@ -173,6 +183,8 @@ Audited witness trace in `hid_own_lane` (r = 0.049): termination horizon, contac
 | E6 | 2/4 | [('hid_left_lane', 'stay'), ('hid_own_lane', 'change_left')] | none | -0.84 / -0.71 |
 | E7 | 4/4 | none | none | 1.66 / 0.54 |
 | E8 | 3/4 | [('hid_own_lane', 'change_left')] | none | 0.66 / -0.46 |
+| E9 | 3/4 | [('hid_own_lane', 'change_left')] | none | 1.66 / 0.54 |
+| E10 | 3/4 | [('hid_own_lane', 'change_left')] | none | 1.16 / 0.04 |
 
 Smallest uniform inflation (lat = lon, no growth, dt 0.1 s, grid 0.05 m) that rejects the witness branch: {'hid_left_lane': 1.7, 'hid_own_lane': 0.55}.
 Audited witness trace in `hid_own_lane` (r = 0.050): termination horizon, contact events none, ego v 14.01 -> 6.71, lateral range [-3.85, -0.00], min clearance (m) {'hid': 1.36}; commands (decision -> effective): brake/None 0.00->0.25, brake/-3.5 0.20->0.45, keep/-3.5 1.35->1.60.
@@ -190,6 +202,8 @@ Audited witness trace in `hid_own_lane` (r = 0.050): termination horizon, contac
 | E6 | 2/4 | [('hid_left_lane', 'stay'), ('hid_own_lane', 'change_left')] | none | -0.84 / -0.71 |
 | E7 | 4/4 | none | none | 1.66 / 0.54 |
 | E8 | 3/4 | [('hid_own_lane', 'change_left')] | none | 0.66 / -0.46 |
+| E9 | 3/4 | [('hid_own_lane', 'change_left')] | none | 1.66 / 0.51 |
+| E10 | 3/4 | [('hid_own_lane', 'change_left')] | none | 1.16 / 0.01 |
 
 Smallest uniform inflation (lat = lon, no growth, dt 0.1 s, grid 0.05 m) that rejects the witness branch: {'hid_left_lane': 1.7, 'hid_own_lane': 0.55}.
 Audited witness trace in `hid_own_lane` (r = 0.018): termination horizon, contact events none, ego v 18.18 -> 6.52, lateral range [-3.76, -0.00], min clearance (m) {'hid': 1.09}; commands (decision -> effective): brake/None 0.00->0.25, brake/-3.5 0.20->0.45, keep/-3.5 1.95->2.20.
@@ -207,21 +221,53 @@ Audited witness trace in `hid_own_lane` (r = 0.018): termination horizon, contac
 | E6 | 2/4 | [('hid_left_lane', 'stay'), ('hid_own_lane', 'change_left')] | none | -0.84 / -0.47 |
 | E7 | 4/4 | none | none | 1.66 / 1.39 |
 | E8 | 4/4 | none | none | 0.66 / 0.39 |
+| E9 | 3/4 | [('hid_own_lane', 'change_left')] | none | 1.66 / 0.83 |
+| E10 | 3/4 | [('hid_own_lane', 'change_left')] | none | 1.16 / 0.33 |
 
 Smallest uniform inflation (lat = lon, no growth, dt 0.1 s, grid 0.05 m) that rejects the witness branch: {'hid_left_lane': 1.7, 'hid_own_lane': 0.85}.
 Audited witness trace in `hid_own_lane` (r = 0.105): termination horizon, contact events none, ego v 18.18 -> 6.52, lateral range [-3.76, -0.00], min clearance (m) {'hid': 1.53}; commands (decision -> effective): brake/None 0.00->0.25, brake/-3.5 0.20->0.45, keep/-3.5 1.95->2.20.
 
-### Summary
+### Repeatability and headline
 
-| scene (v, D, t_reveal) | exact CV envelope (E0): agreement with evidence | E0 rejects the witness | smallest rejecting uniform inflation per world (m) |
+Each RC13 scene was run 3 more times (whole library, same construction). A scene is **marginal** if any witness margin (either world) over the original run and the repeats is within sigma = 0.0167 of eps, or if a sign flips; marginal scenes are excluded from the headline count.
+
+| scene (v, D, t_reveal) | evidence classes (orig + repeats) | witness G world A: range | witness G world B: range | status |
+|---|---|---|---|---|
+| (14.0, 19.0, 0.1) | ['R_REF', 'R_REF', 'R_REF', 'R_REF'] | 0.1047 .. 0.1047 | 0.0490 .. 0.0491 | robust |
+| (14.0, 20.0, 0.2) | ['R_REF', 'R_REF', 'R_REF', 'R_REF'] | 0.1206 .. 0.1206 | 0.0224 .. 0.0504 | robust |
+| (18.0, 26.0, 0.2) | ['R_REF', 'R_REF', 'R_REF', 'R_REF'] | 0.1046 .. 0.1047 | 0.0182 .. 0.0182 | robust |
+| (18.0, 28.0, 0.2) | ['R_REF', 'R_REF', 'R_REF', 'R_REF'] | 0.1046 .. 0.1046 | 0.1051 .. 0.1062 | robust |
+
+**Headline.** Robust scenes (counted): 4 of 4: [(14.0, 19.0, 0.1), (14.0, 20.0, 0.2), (18.0, 26.0, 0.2), (18.0, 28.0, 0.2)]. Marginal scenes (excluded from the count): none.
+
+The rule is applied mechanically. Smallest witness margin over all runs and worlds: 0.0182 in scene (18.0, 26.0, 0.2) = 1.09 x sigma; it is not within sigma of eps, so the scene is not marked marginal, but it is within about 10% of the threshold. The repeats differ by much less than sigma except where the ranges above show otherwise, so sigma is a conservative bound here.
+
+### Predictor summary (robust scenes)
+
+| scene (v, D, t_reveal) | E0 (exact CV, clearance 0): agreement | E0 rejects the witness | smallest rejecting uniform inflation per world (m) | E0 box separation, witness world B (m) | audited actual clearance to hid, witness world B (m) |
+|---|---|---|---|---|---|
+| (14.0, 19.0, 0.1) | 4/4 | False | {'hid_left_lane': 1.7, 'hid_own_lane': 0.85} | 0.83 | 1.25 |
+| (14.0, 20.0, 0.2) | 4/4 | False | {'hid_left_lane': 1.7, 'hid_own_lane': 0.55} | 0.54 | 1.36 |
+| (18.0, 26.0, 0.2) | 4/4 | False | {'hid_left_lane': 1.7, 'hid_own_lane': 0.55} | 0.51 | 1.09 |
+| (18.0, 28.0, 0.2) | 4/4 | False | {'hid_left_lane': 1.7, 'hid_own_lane': 0.85} | 0.83 | 1.53 |
+
+### Metric mismatch between the predictor and the evidence
+
+The predictor uses axis-aligned box separation (max of the longitudinal and lateral gaps) with `clearance_m = 0`, evaluated on a NOMINAL ego path (declared b, tau, quintic lane change). The evidence uses the oriented-box corner clearance of the executed trajectory with a 1 m reserve inside the margin. They are different quantities, so the numbers are not directly comparable: in the robust scenes the exact envelope's box separation for the witness branch is 0.51-0.83 m while the audited actual clearances are 1.09-1.53 m; the difference (0.41 to 0.82 m) is the nominal-model error plus the box-versus-corner metric difference, and it is not separated further here. The smallest rejecting inflation of 0.55-0.85 m is below the evidence's own 1 m reserve: the over-approximation that flips the decision is smaller than the safety reserve the evidence itself demands, so part of what looks like a 'false' rejection is a different safety convention rather than only over-approximation.
+
+Rows E9 (exact envelope, `clearance_m` = 1.0) and E10 (0.5 m inflation, `clearance_m` = 1.0) test the exact envelope against the evidence's own reserve:
+
+| scene | E9 agreement | E9 false rejections | E10 false rejections |
 |---|---|---|---|
-| (14.0, 19.0, 0.1) | 4/4 | False | {'hid_left_lane': 1.7, 'hid_own_lane': 0.85} |
-| (14.0, 20.0, 0.2) | 4/4 | False | {'hid_left_lane': 1.7, 'hid_own_lane': 0.55} |
-| (18.0, 26.0, 0.2) | 4/4 | False | {'hid_left_lane': 1.7, 'hid_own_lane': 0.55} |
-| (18.0, 28.0, 0.2) | 4/4 | False | {'hid_left_lane': 1.7, 'hid_own_lane': 0.85} |
+| (14.0, 19.0, 0.1) | 3/4 | [('hid_own_lane', 'change_left')] | [('hid_own_lane', 'change_left')] |
+| (14.0, 20.0, 0.2) | 3/4 | [('hid_own_lane', 'change_left')] | [('hid_own_lane', 'change_left')] |
+| (18.0, 26.0, 0.2) | 3/4 | [('hid_own_lane', 'change_left')] | [('hid_own_lane', 'change_left')] |
+| (18.0, 28.0, 0.2) | 3/4 | [('hid_own_lane', 'change_left')] | [('hid_own_lane', 'change_left')] |
 
-Reading: where the evidence is R_REF with a witness whose margins are >= eps in both coherent worlds, the exact constant-velocity envelope (E0) is the baseline for the predictor; whether it agrees with the evidence is read from the E0 rows above, not assumed. The over-approximated envelopes reject the witness's branch once the inflation exceeds the smallest value listed, although the evidence shows r >= eps in both worlds, i.e. the predictor closes a corridor that the executed trajectory demonstrably used. The rejection is a property of this predictor and its parameters, not of the scene.
+The exact envelope held to the evidence's own 1 m reserve (E9) DISAGREES with the evidence (it rejects the supported witness) in 4 of 4 robust scenes.
+
+**Reading (scoped).** On the declared worlds, for the robust scenes, the witness is supported by the evidence (r >= eps in both worlds in every repeat, executed without contact) and the exact constant-velocity envelope with zero clearance accepts it. A predictor that adds a constant inflation of about 0.55-0.85 m, or a growth term, to the same envelope rejects the witness branch. That shows how a simple over-approximating predictor can close a corridor the evidence supports; it does not show that any particular real predictor does so, and the thresholds depend on the metric mismatch above (box separation of a nominal path versus corner clearance with reserve of the executed path). Marginal scenes are not part of this statement.
 
 ## Record validation
 
-13 records in `results/carla/negatives/` checked with validate_records.check_record: 0 failures.
+28 records in `results/carla/negatives/` checked with validate_records.check_record: 0 failures.

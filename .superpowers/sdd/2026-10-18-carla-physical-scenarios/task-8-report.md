@@ -46,3 +46,21 @@ Witness `shared_slowdown_then_branch`: G in world A / world B = 0.105/0.049, 0.1
 - RC13 world-B witness margins are small (0.018 to 0.105; 0.018 is within the observed run-to-run spread 0.017 of eps); single runs.
 - RC13 uses box (axis-aligned) separation with clearance 0 for the predictor, a different metric from the evidence's OBB corner clearance with 1 m reserve; the exact predictor happens to agree with evidence on all cells.
 - The decel diagnostic is from clear-road runs (the RC09 episodes end at first contact).
+
+---
+
+# Fix round 1
+
+Command: `PYTHONNOUSERSITE=1 C:/Users/fredw/anaconda3/envs/carla312/python.exe -m pytest -q tests` (repo root) -> `132 passed in 315.95s`. CARLA: `cd mining && python ../scripts/carla_negatives.py` (cached points skipped; 15 new records: 12 RC13 repeats, 3 open-left repeats, about 8 min). Record validation 28 records, 0 failures.
+
+## Findings
+1. RC13 repeatability (3 repeats of every scene, whole library). Witness margins (world A / world B ranges): (14,19,0.1) 0.1047 / 0.0490-0.0491; (14,20,0.2) 0.1206 / 0.0224-0.0504; (18,26,0.2) 0.1046-0.1047 / 0.0182 (all four runs); (18,28,0.2) 0.1046 / 0.1051-0.1062. Rule applied mechanically (sigma 0.0167, marginal if within sigma of eps or sign flip): no scene is marginal, no sign flips, all runs R_REF; headline 4 of 4 robust. Disclosed in the md: the smallest margin 0.0182 is 1.09 x sigma, close to the threshold, and the repeats are nearly identical for that scene (spread far below sigma). Marginal scenes would be excluded by code (`scene_robust`); the md lists robust and marginal separately.
+2. Metric mismatch paragraph added (generated): E0 box separation 0.51-0.83 m vs audited actual clearance 1.09-1.53 m (difference 0.41-0.82 m = nominal-model error plus metric difference); rejection thresholds 0.55-0.85 m are below the evidence's 1 m reserve. New rows E9 (exact, clearance 1.0) and E10 (0.5 m inflation, clearance 1.0): E9 DISAGREES with the evidence (rejects the supported witness) in 4 of 4 scenes. So part of the "false rejection" is a different safety convention, not only over-approximation. RC13 conclusion reworded as a scoped statement (no claim about real predictors).
+3. Open-left RC09 control, 3 repeats: `bypass_left_lc2` margin 0.0222 in all four runs, R_REF each time; not marginal under the rule (1.33 x sigma); the md reports the range and the rule outcome.
+Minors: module-scoped fixture for the RC09 mock record (`base_rec`); anonymity test is now behavioural (same Obs from two worlds gives identical output, extra tag fields ignored); md states gentle braking is dominated (brake_frac 0.0-0.3 hit the blocker at 2.20-2.35 s, higher fractions are hit from behind; no 1-3 m/s^2 level exists on this plant) and that the in-lane refutation is structural; dt now comes from `sim.types.DT`.
+
+## Tests added (tests/test_sim_negatives.py, 13 -> 17)
+repeat_status marginal rule, scene_robust (both worlds, evidence class), exact envelope vs clearance, behavioural anonymity, dt source.
+
+## Concern
+The 0.0182 scene is robust only by the pre-declared rule; it is 1.09 x sigma.

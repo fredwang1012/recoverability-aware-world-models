@@ -37,7 +37,7 @@ from cases import two_lane as TL
 import carla_core as CC
 import carla_compositional as CCP
 from sim import harness as H
-from sim.types import Obs
+from sim.types import DT, Obs
 
 OUT = "results/carla/negatives"
 CFG = M.DEFAULT_V2
@@ -52,10 +52,13 @@ RC09_REAR_GAP = 25.0
 RC09_EXTRA_REAR_GAPS = (15.0, 35.0)               # at v = 14
 RC09_DV = 6.0
 DECEL_LO = 0.4          # upper end of the decel window as a fraction of v0: keeps the window above the end-of-stop wheel-lock transient (below ~4.3 m/s)
+SIGMA = 0.0167          # run-to-run spread of margins (observed, Tasks 3-7); marginal = within SIGMA of eps or a sign flip across repeats
+REPEATS = 3
 RC13_SCENES = ((14.0, 19.0, 0.1), (14.0, 20.0, 0.2), (18.0, 26.0, 0.2), (18.0, 28.0, 0.2))
 ENVELOPES = ([NG.Envelope(lat_m=m, lon_m=m) for m in (0.0, 0.5, 1.0, 1.5, 2.0)]
              + [NG.Envelope(lat_m=0.5, lon_m=0.5, growth_mps=g) for g in (0.25, 0.5)]
-             + [NG.Envelope(lat_m=0.0, lon_m=0.0, dt_s=0.5), NG.Envelope(lat_m=1.0, lon_m=1.0, dt_s=0.5)])
+             + [NG.Envelope(lat_m=0.0, lon_m=0.0, dt_s=0.5), NG.Envelope(lat_m=1.0, lon_m=1.0, dt_s=0.5)]
+             + [NG.Envelope(clearance_m=1.0), NG.Envelope(lat_m=0.5, lon_m=0.5, clearance_m=1.0)])
 THRESH_GRID = [round(0.05 * i, 2) for i in range(0, 81)]
 
 
@@ -82,6 +85,34 @@ def clean(o):
     if isinstance(o, float) and not math.isfinite(o):
         return "-inf" if o < 0 else ("inf" if o > 0 else None)
     return o
+
+
+def repeat_status(gs, eps=CFG.eps, sigma=SIGMA):
+    """gs: margins of the same entry over the original run and its repeats (-inf allowed).  Returns (range, marginal, flips):
+    marginal if any finite value is within sigma of eps (|g - eps| < sigma) or the sign of g - eps differs across runs."""
+    if any(g is None for g in gs):
+        return None, True, True
+    lo, hi = min(gs), max(gs)
+    flips = (lo < eps) != (hi < eps)
+    near = any(g != -math.inf and abs(g - eps) < sigma for g in gs)
+    return (lo, hi), bool(flips or near), bool(flips)
+
+
+def witness_runs(recs):
+    """[(G_world_A, G_world_B)] of shared_slowdown_then_branch over a list of RC13 record dicts."""
+    return [tuple(mpol(r)["shared_slowdown_then_branch"]) for r in recs]
+
+
+def scene_robust(recs, eps=CFG.eps, sigma=SIGMA):
+    """(robust, reason): robust = every run R_REF and no witness margin (either world) marginal under repeat_status."""
+    if any(r["evidence_class"] != "R_REF" for r in recs):
+        return False, "evidence class differs across repeats"
+    runs = witness_runs(recs)
+    for wi in (0, 1):
+        rng, marg, flips = repeat_status([g[wi] for g in runs], eps, sigma)
+        if marg:
+            return False, f"world {('A', 'B')[wi]} witness margin range {rng} is within {sigma:g} of eps or flips"
+    return True, ""
 
 
 def cnt3(r):
@@ -202,7 +233,7 @@ def rc09_point(ctx, theta, rear=True, left_queue=True):
     audit = {}
     for pi, p in enumerate(rec.policies):
         for wi, w in enumerate(rec.worlds):
-            audit[f"{p}/{w}"] = CCP.summarize_trace(logs[pi * nw + wi], rec, f"{p}/{w}", rec.R_raw[pi][wi], 0.05)
+            audit[f"{p}/{w}"] = CCP.summarize_trace(logs[pi * nw + wi], rec, f"{p}/{w}", rec.R_raw[pi][wi], DT)
     j = rec.to_json()
     j["library_id"] = f"{NG.RC09_CLASS_ID}_{TAG}"
     return j, {"audit": audit, "rear": rear, "left_queue": left_queue, "library_id": f"{NG.RC09_CLASS_ID}_{TAG}"}
@@ -219,6 +250,8 @@ def run_rc09(ctx):
     th = rc09_theta(14.0)
     res[("ctl_norear", 14.0, RC09_REAR_GAP)] = ctx.point(f"rc09ctl_{TAG}", "norear", lambda: rc09_point(ctx, th, rear=False))
     res[("ctl_openleft", 14.0, RC09_REAR_GAP)] = ctx.point(f"rc09ctl_{TAG}", "openleft", lambda: rc09_point(ctx, th, left_queue=False))
+    for i in range(1, REPEATS + 1):
+        res[("ctl_openleft_rep", 14.0, i)] = ctx.point(f"rc09ctl_{TAG}", f"openleft_rep{i}", lambda: rc09_point(ctx, th, left_queue=False))
     for k, r in res.items():
         print("RC09", k, r["evidence_class"], flush=True)
     return res
@@ -258,7 +291,7 @@ def rc13_point(ctx, v, D, tr):
     audit = {}
     for pi, p in enumerate(rec["policies"]):
         for wi, w in enumerate(rec["worlds"]):
-            audit[f"{p}/{w}"] = CCP.summarize_trace(logs[pi * nw + wi], rr, f"{p}/{w}", gval(rec["R_raw"][pi][wi]), 0.05)
+            audit[f"{p}/{w}"] = CCP.summarize_trace(logs[pi * nw + wi], rr, f"{p}/{w}", gval(rec["R_raw"][pi][wi]), DT)
     rec["library_id"] = f"rc13_rc10lib_lc2.0_{TAG}"
     return rec, {"obs": {w: vars(o) for w, o in sc["obs"].items()}, "audit": audit, "library_id": rec["library_id"]}
 
@@ -268,7 +301,9 @@ def run_rc13(ctx):
     for v, D, tr in RC13_SCENES:
         r = ctx.point(f"rc13_{TAG}", f"v{v:g}_D{D:g}_tr{tr:g}", lambda v=v, D=D, tr=tr: rc13_point(ctx, v, D, tr))
         res[(v, D, tr)] = {"rec": r, "obs": {w: Obs(**o) for w, o in r["obs"].items()}, "audit": r["audit"]}
-        print("RC13", (v, D, tr), r["evidence_class"], flush=True)
+        res[(v, D, tr)]["reps"] = [ctx.point(f"rc13rep_{TAG}", f"v{v:g}_D{D:g}_tr{tr:g}_rep{i}", lambda v=v, D=D, tr=tr: rc13_point(ctx, v, D, tr))
+                                   for i in range(1, REPEATS + 1)]
+        print("RC13", (v, D, tr), r["evidence_class"], [x["evidence_class"] for x in res[(v, D, tr)]["reps"]], flush=True)
     return res
 
 
@@ -298,7 +333,7 @@ def decel_rows(dec):
         rows = []
         for p, s in r["series"].items():
             f = float(p.split("_")[-1])
-            d = NG.decel_between(s["v"], 0.05, lo=DECEL_LO)
+            d = NG.decel_between(s["v"], DT, lo=DECEL_LO)
             rows.append((p, f, d, s["v"][-1]))
         out[v] = rows
     return out
@@ -312,7 +347,8 @@ def report(ctx, r09, dec, r13):
       f"`a_lat_max = {NG.A_LAT_MAX:g}` m/s^2 (dynamic-limit margin). Records: `results/carla/negatives/*.jsonl`. Labels are `contract.classify` output only; G cells read one value per world "
       "(-inf = hard failure, None = unrun). Mock and CARLA outputs are kept apart.\n")
     mains = {k: r for k, r in r09.items() if k[0] == "main"}
-    ctl = {k: r for k, r in r09.items() if k[0] != "main"}
+    ctl = {k: r for k, r in r09.items() if k[0] in ("ctl_norear", "ctl_openleft")}
+    ol_reps = [r for k, r in sorted(r09.items()) if k[0] == "ctl_openleft_rep"]
     # measured t0 speeds
     rear_rows = []
     for k, r in sorted(mains.items()):
@@ -363,7 +399,7 @@ def report(ctx, r09, dec, r13):
         adj = [x for k2, x in mc.items() if k2.startswith("adj") and x is not None]
         cl = lambda x: "-" if x is None else f"{x:.2f}"
         w(f"| `{p}` | {c['world']} | {fm(c['G'])} | {c['termination']} | {c['collided_with'] or 'none'} | "
-          f"{'-' if c['collision_tick'] is None else f'{c['collision_tick'] * 0.05:.2f}'} | {a['ego_v_end']:.2f} | {a['ego_lat_end']:.2f} | {cl(mc.get('blk'))} / {cl(mc.get('rear'))} / {cl(min(adj) if adj else None)} |")
+          f"{'-' if c['collision_tick'] is None else f'{c['collision_tick'] * DT:.2f}'} | {a['ego_v_end']:.2f} | {a['ego_lat_end']:.2f} | {cl(mc.get('blk'))} / {cl(mc.get('rear'))} / {cl(min(adj) if adj else None)} |")
     who = {}
     for p, c in ce.items():
         who.setdefault(c["collided_with"] or "no contact (G < eps from clearance/terminal/dynamic limit)", []).append(p)
@@ -371,6 +407,12 @@ def report(ctx, r09, dec, r13):
     for k, v in who.items():
         w(f"- {k}: {', '.join('`' + x + '`' for x in v)}")
 
+    bk = {p: c for p, c in ce.items() if p.startswith("brake_frac_") and c["collided_with"] == "blk"}
+    w("\n**Gentle braking is dominated.** Lower brake fractions do not help (measured decel is about 4 to 5 m/s^2 for f <= 0.6 on this plant, see the decel table; there is no 1-3 m/s^2 level): "
+      f"the constant-brake members that hit the blocker are {sorted(bk)} (contact at {sorted({round(c['collision_tick'] * DT, 2) for c in bk.values()})} s), and every member that stops short is hit from behind. "
+      "Lower deceleration arrives at the blocker with speed; higher deceleration stops short and is overtaken by the rear vehicle.\n")
+    w("**The in-lane refutation is structural.** Given a rear vehicle that never reacts and a blocker that never moves, a vehicle confined to its lane is struck by one of them whatever speed profile it follows (either it is not stopped before the blocker, or it is stopped and overtaken). The class-wide refutation of the in-lane members is therefore a consequence of the construction (declared world, blocked left lane, road edge on the right), not an empirical discovery. "
+      "The empirical content is that the lane-change members, which are not structurally excluded, are also refuted (queue contact before the manoeuvre completes) and that the refutations were realised on CARLA with the calibrated plant.\n")
     w("\n### Controls (v 14, gap " + f"{rc09_theta(14.0)['gap_m']:g}" + ", same class)\n")
     w("Each control removes one element of the scene to show what closes it. These are separate records and are not part of the RC09 label.\n")
     w("| control | evidence | members with G >= eps | margins |\n|---|---|---|---|")
@@ -378,6 +420,12 @@ def report(ctx, r09, dec, r13):
         name = {"ctl_norear": "no rear vehicle (left queue present)", "ctl_openleft": "left lane open (rear vehicle present)"}[k[0]]
         ok_m = [p for p, gs in mpol(r).items() if all(g is not None and g >= CFG.eps for g in gs)]
         w(f"| {name} | {r['evidence_class']} | {ok_m or 'none'} | {CCP.mrows(r)} |")
+    ol = [r09[("ctl_openleft", 14.0, RC09_REAR_GAP)]] + ol_reps
+    gs = [mpol(r)["bypass_left_lc2"][0] for r in ol]
+    rng, marg, flips = repeat_status(gs)
+    w(f"\n**Open-left control, repeatability.** The only witness is `bypass_left_lc2`; its margin over the original run and {len(ol_reps)} repeats of the whole record: {[round(g, 4) for g in gs]} "
+      f"(range {rng[0]:.4f} .. {rng[1]:.4f}; evidence classes {[r['evidence_class'] for r in ol]}). Under sigma = {SIGMA:g}: **{'MARGINAL' if marg else 'robust'}**"
+      f"{' (sign flips across repeats)' if flips else ''}. " + ("The control is therefore weak evidence that an open left lane gives an escape; it is reported, not used for any claim beyond 'the escape exists in this run'." if marg else "") + "\n")
 
     w("\n### Brake fraction -> measured deceleration\n")
     w("Clear road (no actors), one ego run per level, from the CARLA speed traces. Deceleration is the mean slope of the ego speed between the first tick below 0.9 v0 and the first tick below 0.4 v0 "
@@ -430,20 +478,58 @@ def report(ctx, r09, dec, r13):
           f"lateral range [{a_own['ego_lat_min']:.2f}, {a_own['ego_lat_max']:.2f}], min clearance (m) {({kk: (None if x is None else round(x, 2)) for kk, x in a_own['min_clearance_m'].items()})}; "
           f"commands (decision -> effective): " + ", ".join(f"{c['long']}/{c['lat_target']} {c['decision_t']:.2f}->{c['effective_t']:.2f}" for c in a_own["commands"]) + ".\n")
     # summary
-    scenes_ref = [k for k, s in r13.items() if s["rec"]["evidence_class"] == "R_REF"]
-    summ = []
-    for k in scenes_ref:
+    w("### Repeatability and headline\n")
+    w(f"Each RC13 scene was run {REPEATS} more times (whole library, same construction). A scene is **marginal** if any witness margin (either world) over the original run and the repeats is within sigma = {SIGMA:g} of eps, or if a sign flips; "
+      "marginal scenes are excluded from the headline count.\n")
+    w("| scene (v, D, t_reveal) | evidence classes (orig + repeats) | witness G world A: range | witness G world B: range | status |\n|---|---|---|---|---|")
+    robust = []
+    for k, s in r13.items():
+        recs = [s["rec"]] + s["reps"]
+        ok_, why = scene_robust(recs)
+        runs = witness_runs(recs)
+        ra, rb = (repeat_status([g[i] for g in runs])[0] for i in (0, 1))
+        if ok_:
+            robust.append(k)
+        w(f"| {k} | {[r['evidence_class'] for r in recs]} | {ra[0]:.4f} .. {ra[1]:.4f} | {rb[0]:.4f} .. {rb[1]:.4f} | {'robust' if ok_ else 'MARGINAL: ' + why} |")
+    marg = [k for k in r13 if k not in robust]
+    w(f"\n**Headline.** Robust scenes (counted): {len(robust)} of {len(r13)}: {robust or 'none'}. Marginal scenes (excluded from the count): {marg or 'none'}.\n")
+    allg = [(k, g) for k, x in r13.items() for g in [m for run in witness_runs([x["rec"]] + x["reps"]) for m in run]]
+    kmin, gmin = min(allg, key=lambda t: t[1])
+    w(f"The rule is applied mechanically. Smallest witness margin over all runs and worlds: {gmin:.4f} in scene {kmin} = {gmin / SIGMA:.2f} x sigma; it is not within sigma of eps, so the scene is not marked marginal, but it is within about 10% of the threshold. "
+      "The repeats differ by much less than sigma except where the ranges above show otherwise, so sigma is a conservative bound here.\n")
+    w("### Predictor summary (robust scenes)\n")
+    w("| scene (v, D, t_reveal) | E0 (exact CV, clearance 0): agreement | E0 rejects the witness | smallest rejecting uniform inflation per world (m) | E0 box separation, witness world B (m) | audited actual clearance to hid, witness world B (m) |\n|---|---|---|---|---|---|")
+    seps, acts, thrs, cl1, cl2 = [], [], [], [], []
+    clr_idx = len(ENVELOPES) - 2          # exact envelope with clearance_m = 1.0
+    for k in robust:
         s = r13[k]
-        t0 = rc13_table(s, [ENVELOPES[0]])[0]
+        tb = rc13_table(s, ENVELOPES)
+        t0 = tb[0]
         thr = witness_threshold(s)
-        summ.append((k, t0["agree"], t0["n"], bool(t0["false_rejections"]), thr))
-    w("### Summary\n")
-    w("| scene (v, D, t_reveal) | exact CV envelope (E0): agreement with evidence | E0 rejects the witness | smallest rejecting uniform inflation per world (m) |\n|---|---|---|---|")
-    for k, a, n, fr, thr in summ:
-        w(f"| {k} | {a}/{n} | {fr} | {thr} |")
-    w("\nReading: where the evidence is R_REF with a witness whose margins are >= eps in both coherent worlds, the exact constant-velocity envelope (E0) is the baseline for the predictor; whether it "
-      "agrees with the evidence is read from the E0 rows above, not assumed. The over-approximated envelopes reject the witness's branch once the inflation exceeds the smallest value listed, although "
-      "the evidence shows r >= eps in both worlds, i.e. the predictor closes a corridor that the executed trajectory demonstrably used. The rejection is a property of this predictor and its parameters, not of the scene.")
+        sep = [c for c in t0["cells"] if c["role"] == "witness"][1]["min_sep_m"]
+        act = s["audit"]["shared_slowdown_then_branch/hid_own_lane"]["min_clearance_m"]["hid"]
+        seps.append(sep)
+        acts.append(act)
+        thrs.append(thr["hid_own_lane"])
+        cl1.append(tb[clr_idx])
+        cl2.append(tb[clr_idx + 1])
+        w(f"| {k} | {t0['agree']}/{t0['n']} | {bool(t0['false_rejections'])} | {thr} | {sep:.2f} | {act:.2f} |")
+    if robust:
+        w("\n### Metric mismatch between the predictor and the evidence\n")
+        diffs = [a - b for a, b in zip(acts, seps)]
+        w("The predictor uses axis-aligned box separation (max of the longitudinal and lateral gaps) with `clearance_m = 0`, evaluated on a NOMINAL ego path (declared b, tau, quintic lane change). The evidence uses the oriented-box corner clearance of the executed trajectory with a 1 m reserve inside the margin. They are different quantities, so the numbers are not directly comparable: "
+          f"in the robust scenes the exact envelope's box separation for the witness branch is {min(seps):.2f}-{max(seps):.2f} m while the audited actual clearances are {min(acts):.2f}-{max(acts):.2f} m; the difference ({min(diffs):.2f} to {max(diffs):.2f} m) is the nominal-model error plus the box-versus-corner metric difference, and it is not separated further here. "
+          f"The smallest rejecting inflation of {min(thrs):.2f}-{max(thrs):.2f} m is below the evidence's own 1 m reserve: the over-approximation that flips the decision is smaller than the safety reserve the evidence itself demands, so part of what looks like a 'false' rejection is a different safety convention rather than only over-approximation.\n")
+        w(f"Rows E{clr_idx} (exact envelope, `clearance_m` = 1.0) and E{clr_idx + 1} (0.5 m inflation, `clearance_m` = 1.0) test the exact envelope against the evidence's own reserve:\n")
+        w(f"| scene | E{clr_idx} agreement | E{clr_idx} false rejections | E{clr_idx + 1} false rejections |\n|---|---|---|---|")
+        for k, r1, r2 in zip(robust, cl1, cl2):
+            w(f"| {k} | {r1['agree']}/{r1['n']} | {[(a, b) for a, b, _, _ in r1['false_rejections']] or 'none'} | {[(a, b) for a, b, _, _ in r2['false_rejections']] or 'none'} |")
+        e1 = [bool(r['false_rejections']) for r in cl1]
+        w(f"\nThe exact envelope held to the evidence's own 1 m reserve (E{clr_idx}) "
+          + (f"DISAGREES with the evidence (it rejects the supported witness) in {sum(e1)} of {len(e1)} robust scenes." if any(e1) else "agrees with the evidence in every robust scene.") + "\n")
+    w("**Reading (scoped).** On the declared worlds, for the robust scenes, the witness is supported by the evidence (r >= eps in both worlds in every repeat, executed without contact) and the exact constant-velocity envelope with zero clearance accepts it. "
+      "A predictor that adds a constant inflation of about 0.55-0.85 m, or a growth term, to the same envelope rejects the witness branch. That shows how a simple over-approximating predictor can close a corridor the evidence supports; "
+      "it does not show that any particular real predictor does so, and the thresholds depend on the metric mismatch above (box separation of a nominal path versus corner clearance with reserve of the executed path). Marginal scenes are not part of this statement.")
     n, bad_ = validate_all()
     w(f"\n## Record validation\n\n{n} records in `results/carla/negatives/` checked with validate_records.check_record: {len(bad_)} failures.")
     for b in bad_[:10]:
