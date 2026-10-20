@@ -1,4 +1,6 @@
-"""T7: validate an exported scenes.jsonl: schema, no NaNs, V == max_j R_j, category consistent with V and eps."""
+"""T7: validate an exported scenes.jsonl: schema, no NaNs, V == max_j R_j, category consistent with V and eps.
+Rows with schema_version "E1.1" (export.py records) go through check_e1: shapes, null/mask consistency, labels recomputed with
+contract.classify, terminal block, pair/variant field consistency, history = delivered-observation features only, npz agrees."""
 import argparse
 import json
 import math
@@ -27,6 +29,8 @@ def finite(x):
 
 
 def check(rec, root):
+    if rec.get("schema_version") == "E1.1":
+        return check_e1(rec, root)
     errs = [f"missing {k}" for k in REQUIRED if k not in rec]
     if errs:
         return errs
@@ -61,6 +65,143 @@ def check(rec, root):
         errs.append("incomplete pair fields")
     if not os.path.exists(os.path.join(root, rec["trace_path"])):
         errs.append(f"missing trace {rec['trace_path']}")
+    return errs
+
+
+# ============================================================================= E1.1 rows (physical-case ExecutionRecords, export.py records)
+E1_REQUIRED = ["schema_version", "id", "case_id", "family_id", "split_group", "backend", "evidence_scope", "seed", "theta", "history",
+               "policy_library_id", "policy_library_version", "policy_library", "world_set_id", "world_set", "R", "R_search", "R_mask",
+               "V", "V_hind", "info_gap", "evidence", "best_policy", "margin_config", "margin_config_id", "physics_profile", "terminal",
+               "pair_id", "pair_role", "varied_factor", "parent_id", "variant_kind", "sources", "trace_path", "trace_key", "invalid_reasons"]
+HIST_KEYS = {"t_capture", "t_available", "v", "lane_w", "ego_hl", "objs"}
+OBJ_KEYS = {"dx", "dlat", "dv", "hl", "hw"}
+TERMINAL_MODES = {"protected_hold", "lane_follow"}
+_NPZ = {}
+
+
+def _f(x):
+    """record number -> float (None = unrun/unresolved -> NaN, '-inf' -> -inf)."""
+    if x is None:
+        return math.nan
+    if x == "-inf":
+        return -math.inf
+    return float(x)
+
+
+def _same(a, b, tol=1e-9):
+    """equality that treats NaN == NaN and -inf == -inf."""
+    if math.isnan(a) or math.isnan(b):
+        return math.isnan(a) and math.isnan(b)
+    if math.isinf(a) or math.isinf(b):
+        return a == b
+    return abs(a - b) <= tol
+
+
+def _npz(path):
+    if path not in _NPZ:
+        _NPZ[path] = np.load(path) if os.path.exists(path) else None
+    return _NPZ[path]
+
+
+def check_e1(rec, root):
+    errs = [f"missing {k}" for k in E1_REQUIRED if k not in rec]
+    if errs:
+        return errs
+    P, W = len(rec["policy_library"]), len(rec["world_set"])
+    for k in ("R", "R_search", "R_mask", "terminal"):
+        m = rec["terminal"]["boolean"] if k == "terminal" else rec[k]
+        if len(m) != P or any(len(r) != W for r in m):
+            return [f"{k} shape != policies x worlds"]
+    # numbers: no NaN/inf serialised as a number; unresolved = null, terminal failure = '-inf'
+    for k in ("R", "R_search"):
+        for row in rec[k]:
+            for x in row:
+                if isinstance(x, float) and not math.isfinite(x):
+                    errs.append(f"{k}: non-finite float serialised as a number (use null / '-inf')")
+                if k == "R_search" and x == "-inf":
+                    errs.append("R_search must be finite or null")
+    if not finite({k: rec[k] for k in ("theta", "margin_config", "seed")}):
+        errs.append("NaN/inf in theta / margin_config")
+    if rec["backend"] not in ("mock", "carla"):
+        errs.append(f"bad backend {rec['backend']}")
+    if rec["backend"] == "carla" and not (isinstance(rec["physics_profile"], str) and rec["physics_profile"].startswith("pp_")):
+        errs.append(f"carla record without a physics profile id ({rec['physics_profile']!r})")
+    if rec["backend"] == "mock" and rec["physics_profile"] is not None:
+        errs.append("mock record must have physics_profile null")
+    # R_mask <=> R is not null (an unrun entry is never 0 / failure)
+    for j in range(P):
+        for w in range(W):
+            if (rec["R"][j][w] is None) != (rec["R_mask"][j][w] == 0):
+                errs.append(f"R_mask[{j}][{w}] disagrees with R (unrun entries must be null)")
+    # labels recomputed from R with contract.classify (labels only from evidence); INVALID_RUN is the only override
+    R = np.array([[_f(x) for x in row] for row in rec["R"]], float)
+    c = contract.classify(R, rec["margin_config"].get("eps", 0.0))
+    if rec["evidence"] != "INVALID_RUN" and rec["evidence"] != c["evidence"]:
+        errs.append(f"evidence {rec['evidence']} != classify {c['evidence']}")
+    if rec["evidence"] == "INVALID_RUN" and not rec["invalid_reasons"]:
+        errs.append("INVALID_RUN without invalid_reasons")
+    for name, got, want in (("V", rec["V"], c["V"]), ("V_hind", rec["V_hind"], c["V_hind"]), ("info_gap", rec["info_gap"], c["info_gap"])):
+        if not _same(_f(got), want):
+            errs.append(f"{name}={got} != classify {want}")
+    if not (np.isnan(c["V"]) or np.isnan(c["V_hind"])) and c["V"] > c["V_hind"] + 1e-9:
+        errs.append("V > V_hind")
+    if c["best_policy"] is not None and rec["best_policy"] != rec["policy_library"][c["best_policy"]]:
+        errs.append("best_policy != argmax of r_j")
+    # terminal block
+    tm = rec["terminal"]
+    if set(tm["mode"]) != set(rec["policy_library"]) or any(v not in TERMINAL_MODES for v in tm["mode"].values()):
+        errs.append("terminal.mode keys differ from policy_library or bad mode")
+    for j in range(P):
+        for w in range(W):
+            t = tm["boolean"][j][w]
+            if (t is None) != (rec["R_mask"][j][w] == 0) or (t is not None and not isinstance(t, bool)):
+                errs.append(f"terminal.boolean[{j}][{w}] inconsistent with R_mask")
+            if t is False and rec["R"][j][w] not in ("-inf", None):
+                errs.append(f"terminal failed but R[{j}][{w}] is not -inf/null")
+    # pair fields: all set or all null; Cosmos variant fields consistent
+    pf = [rec["pair_id"], rec["pair_role"], rec["varied_factor"]]
+    if any(x is not None for x in pf) and (any(x is None for x in pf) or rec["pair_role"] not in ("unrecoverable", "recoverable")):
+        errs.append("incomplete pair fields")
+    if rec["pair_id"] is not None and rec["split_group"] != rec["pair_id"]:
+        errs.append("pair member must share the pair split_group")
+    if (rec["parent_id"] is None) != (rec["variant_kind"] is None):
+        errs.append("parent_id and variant_kind must be both set or both null")
+    # history: only delivered features, never world identity, per-world list in world_set order
+    h = rec["history"]
+    if h is not None:
+        if set(h) != {"policy", "per_world", "common_prefix_frames"} or len(h["per_world"]) != W:
+            errs.append("history must be {policy, per_world[len(world_set)], common_prefix_frames}")
+        else:
+            bad = False
+            for fs in h["per_world"]:
+                for fr in fs:
+                    if set(fr) != HIST_KEYS or any(set(o) != OBJ_KEYS for o in fr["objs"]):
+                        errs.append("history frame has keys other than delivered-observation features")
+                        bad = True
+                        break
+                    if fr["t_available"] < fr["t_capture"] - 1e-9:
+                        errs.append("history frame available before captured")
+                        bad = True
+                        break
+                if bad:
+                    break
+            pre = h["common_prefix_frames"]
+            if not bad and pre > 0 and any(fs[:pre] != h["per_world"][0][:pre] for fs in h["per_world"]):
+                errs.append("common_prefix_frames claims identical frames that differ")
+    # npz
+    z = _npz(os.path.join(root, rec["trace_path"]))
+    if z is None:
+        errs.append(f"missing {rec['trace_path']}")
+    else:
+        for k in (f"{rec['trace_key']}/R", f"{rec['trace_key']}/R_search"):
+            if k not in z.files:
+                errs.append(f"npz missing {k}")
+        if h is not None and f"{rec['trace_key']}/w0__t_capture" not in z.files:
+            errs.append("npz missing history arrays")
+        if f"{rec['trace_key']}/R" in z.files:
+            a = z[f"{rec['trace_key']}/R"]
+            if not np.array_equal(np.nan_to_num(a, nan=7e9), np.nan_to_num(R, nan=7e9)):
+                errs.append("npz R differs from jsonl R")
     return errs
 
 

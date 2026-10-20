@@ -6,6 +6,10 @@ each record - never a physical-impossibility claim.  Cosmos appearance variants 
 variant_kind='appearance' and inherit theta and R unchanged.
 
 Usage:  python export.py --run ../results/mock_run --algos sobol,straddle,bisect --out ../results/dataset
+
+E1 export of physical-case ExecutionRecords (schema "E1.1": corridor / rc03 / infogap mining records, mock or CARLA, never mixed):
+    python mining/export.py records --backend mock                      (repo root; writes results/mock/dataset)
+    cd mining && python export.py records --backend carla              (writes results/carla/dataset)
 """
 import argparse
 import hashlib
@@ -17,6 +21,7 @@ import numpy as np
 import pandas as pd
 
 import core
+import records as RC
 
 SCHEMA_VERSION = 1
 KEEP_CATS = ("unrecoverable", "edge", "planner_failure")
@@ -125,5 +130,168 @@ def main():
     print(f"exported {n} scenes ({len(pair_of)} pair members) to {a.out}/scenes.jsonl")
 
 
+# ============================================================================= E1: physical-case ExecutionRecords
+E1_VERSION = "E1.1"
+E1_FIELDS = ["id", "case_id", "family_id", "split_group", "theta", "history", "policy_library_id", "policy_library_version", "world_set_id",
+             "R", "V", "V_hind", "info_gap", "evidence", "margin_config", "physics_profile", "terminal", "pair_id", "pair_role",
+             "varied_factor", "parent_id", "variant_kind"]
+E1_EXTRA = ["schema_version", "backend", "evidence_scope", "seed", "policy_library", "world_set", "R_search", "R_mask", "best_policy",
+            "margin_config_id", "sources", "trace_path", "trace_key", "code_version", "record_checksum", "invalid_reasons"]
+HIST_KEYS = {"t_capture", "t_available", "v", "lane_w", "ego_hl", "objs"}
+OBJ_KEYS = {"dx", "dlat", "dv", "hl", "hw"}
+SOURCE_FAMILIES = ("corridor", "rc03", "infogap")
+
+
+def _num(x):
+    """record JSON number -> float (None = unrun -> NaN, '-inf' -> -inf)."""
+    return np.nan if x is None else (-np.inf if x == "-inf" else float(x))
+
+
+def r_array(R):
+    return np.array([[_num(x) for x in row] for row in R], float)
+
+
+def _round_frame(fr):
+    return {"t_capture": round(fr["t_capture"], 4), "t_available": round(fr["t_available"], 4), "v": round(fr["v"], 4),
+            "lane_w": round(fr["lane_w"], 4), "ego_hl": round(fr["ego_hl"], 4),
+            "objs": [{k: round(o[k], 4) for k in sorted(OBJ_KEYS)} for o in fr["objs"]]}
+
+
+def history_of(rec):
+    """Delivered-observation history of the best policy in each world (world order = rec['worlds']), or None when the record was produced
+    without keep_history (every record before Task 9 D5).  Frames hold only what the policy was handed: timestamps, ego speed, lane width,
+    anonymous objects.  common_prefix_frames = leading frames identical in all worlds (the pre-reveal, world-indistinguishable history)."""
+    bp = rec.get("best_policy")
+    if bp is None:
+        return None
+    per = []
+    for w in rec["worlds"]:
+        h = (rec.get("traces") or {}).get(f"{bp}/{w}", {}).get("history")
+        if h is None:
+            return None
+        per.append([_round_frame(f) for f in h])
+    prefix = 0
+    for fs in zip(*per):
+        if all(f == fs[0] for f in fs):
+            prefix += 1
+        else:
+            break
+    return {"policy": bp, "per_world": per, "common_prefix_frames": prefix}
+
+
+def world_set_id(rec):
+    ws = (rec.get("geometry") or {}).get("world_spec") or []
+    return f"{rec['family_id']}_ws_{RC.checksum({'worlds': rec['worlds'], 'spec': ws})[:8]}"
+
+
+def case_row(rec, pair=None, sources=()):
+    """One E1 row from an ExecutionRecord JSON.  Non-applicable fields are null (pair_*, parent_id, variant_kind, history without
+    keep_history, physics_profile on the mock plant), never an empty string / 0.  Labels are copied from the record, which derived them
+    with contract.classify; the validator recomputes them."""
+    sid = scene_id(f"{rec['family_id']}/{rec['case_id']}", rec["theta"])
+    desc = rec["policy_descriptors"]
+    row = {
+        "schema_version": E1_VERSION, "id": sid, "case_id": rec["case_id"], "family_id": rec["family_id"],
+        "split_group": pair["pair_id"] if pair else rec["split_group"],
+        "backend": rec["backend"], "evidence_scope": rec["evidence_scope"], "seed": rec["seed"], "theta": rec["theta"],
+        "history": history_of(rec),
+        "policy_library_id": rec.get("library_id") or f"{rec['family_id']}_library", "policy_library_version": RC.checksum(desc)[:8],
+        "policy_library": list(rec["policies"]),
+        "world_set_id": world_set_id(rec), "world_set": list(rec["worlds"]),
+        "R": rec["R_raw"], "R_search": rec["R_norm"], "R_mask": [[0 if x is None else 1 for x in r_] for r_ in rec["R_raw"]],
+        "V": rec["V"], "V_hind": rec["V_hind"], "info_gap": rec["info_gap"], "evidence": rec["evidence_class"], "best_policy": rec["best_policy"],
+        "margin_config": rec["margin_config"], "margin_config_id": RC.checksum(rec["margin_config"])[:8],
+        "physics_profile": rec.get("physics_profile_id"),
+        "terminal": {"mode": {d["name"]: d.get("terminal") for d in desc}, "boolean": rec["terminal_ok"]},
+        "pair_id": pair["pair_id"] if pair else None, "pair_role": pair["role"] if pair else None,
+        "varied_factor": pair["varied"] if pair else None,
+        "parent_id": None, "variant_kind": None,        # Cosmos appearance variants would set both; none exist yet
+        "sources": list(sources), "code_version": rec["code_version"], "record_checksum": rec["checksum"],
+        "invalid_reasons": rec.get("invalid_reasons", []),
+        "trace_path": "traces.npz", "trace_key": sid,
+    }
+    return row
+
+
+def history_arrays(h):
+    """per-world arrays for the npz: t_capture, t_available, v, n_obj and padded objs [frames, max_obj, 5] (dx, dlat, dv, hl, hw)."""
+    out = {}
+    for wi, fs in enumerate(h["per_world"]):
+        mo = max([len(f["objs"]) for f in fs] + [1])
+        objs = np.full((len(fs), mo, 5), np.nan)
+        for i, f in enumerate(fs):
+            for j, o in enumerate(f["objs"]):
+                objs[i, j] = [o["dx"], o["dlat"], o["dv"], o["hl"], o["hw"]]
+        out[f"w{wi}__t_capture"] = np.array([f["t_capture"] for f in fs])
+        out[f"w{wi}__t_available"] = np.array([f["t_available"] for f in fs])
+        out[f"w{wi}__v"] = np.array([f["v"] for f in fs])
+        out[f"w{wi}__n_obj"] = np.array([len(f["objs"]) for f in fs])
+        out[f"w{wi}__objs"] = objs
+    return out
+
+
+def load_jsonl(path):
+    return [json.loads(line) for line in open(path) if line.strip()]
+
+
+def collect_records(root, families=SOURCE_FAMILIES):
+    """(rec, pair-or-None, source-file) for every pair member and record under root/<family>/; pair members first so they win a theta collision."""
+    out = []
+    for fam in families:
+        d = os.path.join(root, fam)
+        if not os.path.isdir(d):
+            continue
+        for fn in sorted(os.listdir(d)):
+            if fn.startswith("pairs_") and fn.endswith(".jsonl"):
+                for p in load_jsonl(os.path.join(d, fn)):
+                    for role, key in (("unrecoverable", "unrecoverable_side"), ("recoverable", "recoverable_side")):
+                        out.append((p[key], {"pair_id": p["pair_id"], "role": role, "varied": p["varied"]}, fn))
+        for fn in sorted(os.listdir(d)):
+            if fn.startswith("records_") and fn.endswith(".jsonl"):
+                out += [(r, None, fn) for r in load_jsonl(os.path.join(d, fn))]
+    return out
+
+
+def export_records(root, out_dir, backend, families=SOURCE_FAMILIES):
+    """Write out_dir/scenes.jsonl (E1.1 rows) and out_dir/traces.npz.  Duplicate scene ids (same family, case and theta from several
+    algorithms) keep ONE row (pair member first, then the first source) and list every source file in `sources`; the other measurements of the
+    same theta are not merged (CARLA re-runs of one theta differ by the repeat spread)."""
+    os.makedirs(out_dir, exist_ok=True)
+    rows, arrays, srcs = {}, {}, {}
+    for rec, pair, src in collect_records(root, families):
+        if rec["backend"] != backend:
+            raise RuntimeError(f"record backend {rec['backend']!r} != requested {backend!r}; mock and CARLA are exported separately")
+        row = case_row(rec, pair)
+        srcs.setdefault(row["id"], []).append(src)
+        if row["id"] in rows:
+            continue
+        rows[row["id"]] = row
+        arrays[f"{row['id']}/R"] = r_array(rec["R_raw"])
+        arrays[f"{row['id']}/R_search"] = r_array(rec["R_norm"])
+        if row["history"] is not None:
+            for k, v in history_arrays(row["history"]).items():
+                arrays[f"{row['id']}/{k}"] = v
+    with open(f"{out_dir}/scenes.jsonl", "w") as f:
+        for sid, row in rows.items():
+            row["sources"] = sorted(set(srcs[sid]))
+            f.write(json.dumps(row) + "\n")
+    np.savez_compressed(f"{out_dir}/traces.npz", **arrays)
+    return len(rows), sum(r["history"] is not None for r in rows.values())
+
+
+def main_records():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("cmd")
+    ap.add_argument("--backend", choices=["mock", "carla"], required=True)
+    ap.add_argument("--root", default=None, help="mining results dir holding corridor/ rc03/ infogap/ (default results/<backend>/mining)")
+    ap.add_argument("--out", default=None, help="default results/<backend>/dataset")
+    a = ap.parse_args()
+    root = a.root or f"results/{a.backend}/mining"
+    out = a.out or f"results/{a.backend}/dataset"
+    n, nh = export_records(root, out, a.backend)
+    print(f"exported {n} E1.1 scenes ({nh} with delivered-observation history) from {root} to {out}/scenes.jsonl + traces.npz")
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    main_records() if len(sys.argv) > 1 and sys.argv[1] == "records" else main()
