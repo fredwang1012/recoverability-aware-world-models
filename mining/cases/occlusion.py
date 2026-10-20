@@ -78,7 +78,7 @@ def rc14_library(lc_time=LC_TIME):
     return library(lc_time) + [lambda: P.SharedSlowdownThenBranch(lc_time=lc_time, memory=False)]
 
 
-def run(case, plant_factory, theta, cfg, backend, scope, worlds_=None, library_=None, spec_=None, family=None, **kw):
+def run(case, plant_factory, theta, cfg, backend, scope, worlds_=None, library_=None, spec_=None, family=None, split_group=None, **kw):
     """case RC10 / RC11 use worlds(theta['t_reveal_s']); RC14 uses rc14_worlds(theta['t_forget_s'])."""
     sp = spec_ or spec(theta, cfg)
     if case == "RC14":
@@ -88,4 +88,4 @@ def run(case, plant_factory, theta, cfg, backend, scope, worlds_=None, library_=
         ws = worlds_ or worlds(theta["t_reveal_s"], theta)
         lib = library_ or library()
     fam = family or f"occlusion_{case}"
-    return evaluate(plant_factory, sp, lib, ws, theta, case, fam, fam, backend, scope, cfg=cfg, **kw)
+    return evaluate(plant_factory, sp, lib, ws, theta, case, fam, split_group or fam, backend, scope, cfg=cfg, **kw)

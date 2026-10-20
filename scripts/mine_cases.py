@@ -148,7 +148,8 @@ def run_one(fam, name, budget, seed, ctx, outdir, batch=4, bisect_iters=None):
                 a = fam.anchor(th, ctx)
                 r = rec.to_json()
                 r["_u"] = [float(x) for x in u]
-                r["_Vsearch"] = search_value(rec)
+                sv = getattr(fam, "search_value", None)             # family-specific search surrogate (D5); default = V_search
+                r["_Vsearch"] = float(sv(rec, name)) if sv else search_value(rec)
                 r["_anchor_G_m"] = a
                 r["_algo"], r["_seed"] = name, seed
                 r.update(fam.meta())

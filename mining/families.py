@@ -116,7 +116,44 @@ class Rc07(Family):
                       **ctx.get("run_kw", {}))
 
 
+class InfoGap(Family):
+    """D5 info-gap family = RC10/RC11 (cases.occlusion): theta = (D, v, t_reveal).  D = bumper gap to the hidden stopped vehicle, which sits in
+    the ego lane or the adjacent lane (two worlds); the feed withholds it until t_reveal.  tau 0.25 s, braking authority fixed at the
+    calibrated decel target, library lc_time 2.0, a_lat_max 8 (same declared scene as the Task 7 sweep).  Records keep the delivered
+    observation history (E1).  Search value per algorithm: see infogap.py; labels and the objective come from the full record."""
+    name = "infogap"
+    names = ["gap_m", "v_mps", "t_reveal_s"]
+    lo = np.array([14.0, 12.0, 0.0])
+    hi = np.array([34.0, 18.0, 1.2])
+    TAU = 0.25
+
+    def _theta(self, v):
+        th = dict(zip(self.names, map(float, v)))
+        th["gap_m"], th["v_mps"] = round(th["gap_m"], 1), round(th["v_mps"], 1)
+        th["t_reveal_s"] = round(_q(th["t_reveal_s"]), 2)
+        th["tau_s"], th["b_mps2"] = self.TAU, CARLA_DECEL
+        return th
+
+    def descriptors(self, th):
+        return th["gap_m"] / th["v_mps"], th["t_reveal_s"]
+
+    def meta(self):
+        return {"library_id": f"occ_lc2.0_al8lc2", "lc_time": 2.0, "a_lat_max": 8.0, "b_fixed_mps2": CARLA_DECEL}
+
+    def search_value(self, rec, algo):
+        import infogap as IG
+        f = IG.cem_surrogate if algo == "cem" else IG.straddle_surrogate
+        return float(f(rec.R_norm, rec.margin_config.get("eps", 0.0)))
+
+    def run(self, th, ctx):
+        from cases import occlusion as OC
+        case = "RC10" if th["t_reveal_s"] <= 0.5 else "RC11"
+        return OC.run(case, lambda: ctx["factory"](th), th, ctx["cfg"], ctx["backend"], ctx["scope"], family="infogap",
+                      split_group=f"infogap_D{th['gap_m']:g}_v{th['v_mps']:g}", keep_history=True, **ctx.get("run_kw", {}))
+
+
 FAMILIES = {f.name: f for f in (Corridor(), Rc03(), Rc07())}
+INFOGAP = InfoGap()          # D5 family: driven by scripts/mine_infogap.py (its search value is per algorithm), not by mine_cases.summarise
 
 
 # ----------------------------------------------------------------------------- CARLA variants (Task 5; mock families above unchanged)

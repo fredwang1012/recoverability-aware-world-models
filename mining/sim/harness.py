@@ -86,6 +86,7 @@ class EpisodeResult:
     timestamps: dict = field(default_factory=dict)
     geometry: dict = field(default_factory=dict)
     route_goal_completed: object = None                  # None = no route goal declared; else bool (never part of the label)
+    history: object = None                               # delivered observations [{t_capture,t_available,v,lane_w,ego_hl,objs}] when keep_history
 
 
 def _poses(states):
@@ -108,7 +109,7 @@ def terminal_test(mode, ego_hist, speeds, dt, cfg, spec):
     raise ValueError(f"unknown terminal mode {mode}")
 
 
-def run_episode(plant, spec, policy, world, cfg=M.DEFAULT_V2, seed=0):
+def run_episode(plant, spec, policy, world, cfg=M.DEFAULT_V2, seed=0, keep_history=False):
     dt = plant.dt
     ego_s = dict(spec["ego"], static=False)
     sp_actors = {n: {**a, **world.get("spawn", {}).get(n, {})} for n, a in spec["actors"].items()}      # per-world placement override
@@ -197,6 +198,8 @@ def run_episode(plant, spec, policy, world, cfg=M.DEFAULT_V2, seed=0):
         G=out["G"], G_search=out["G_search"], terminal_ok=bool(term_ok), termination=termination, invalid=invalid,
         margin={k: v for k, v in out.items() if k in ("G_raw", "parts", "min_clearance_m", "dyn_peaks")}, events=snap.events,
         route_goal_completed=route_done,
+        history=[{"t_capture": o.t_capture, "t_available": o.t_available, "v": o.v, "lane_w": o.lane_w, "ego_hl": o.ego_hl,
+                  "objs": o.objs} for o in history] if keep_history else None,
         ego=[(i * dt, *p, v) for i, (p, v) in enumerate(zip(ego_hist, speeds))],
         timestamps={"observations": feed.log[-3:], "commands": pipe.log, "brake_effective_t": brake_eff_t,
                     "measured_response_delay_s": measured, "configured_delay_s": d.get("obs", 0) + d.get("plan", 0) + d.get("act", 0)},
@@ -207,9 +210,10 @@ def run_episode(plant, spec, policy, world, cfg=M.DEFAULT_V2, seed=0):
 
 def evaluate(plant_factory, spec, library, worlds, theta, case_id, family_id, split_group, backend, evidence_scope,
              cfg=M.DEFAULT_V2, seed=0, physics_profile_id=None, runtime=None, parent_family_id=None, varied_factor=None,
-             run_mask=None):
+             run_mask=None, keep_history=False):
     """PDF 9.2: for each policy, for each compatible world, a fresh matched episode; store witness/counterexample/unresolved
     evidence; classify with contract.classify.  Any invalid episode makes the whole record INVALID_RUN.
+    keep_history: store the delivered observation history of every episode in traces[<policy>/<world>]["history"] (E1 export; off by default, it is large).
     run_mask: optional set of (policy_idx, world_idx) pairs that are actually executed; every other entry stays None
     (unresolved, never 0 / failure) - used for query-budget-limited searches (RC20)."""
     R_raw, R_norm, T, runs, invalid, descr = [], [], [], {}, [], []
@@ -223,7 +227,7 @@ def evaluate(plant_factory, spec, library, worlds, theta, case_id, family_id, sp
                 continue
             plant = plant_factory()
             try:
-                res = run_episode(plant, spec, mk(), w, cfg, seed)
+                res = run_episode(plant, spec, mk(), w, cfg, seed, keep_history=keep_history)
             finally:
                 plant.close()
             if res.invalid:
@@ -233,7 +237,7 @@ def evaluate(plant_factory, spec, library, worlds, theta, case_id, family_id, sp
             tt.append(res.terminal_ok)
             runs[f"{p0.name}/{w['name']}"] = {"termination": res.termination, "events": res.events, "margin": res.margin,
                                               "route_goal_completed": res.route_goal_completed,
-                                              "timestamps": res.timestamps, "final": res.ego[-1]}
+                                              "timestamps": res.timestamps, "final": res.ego[-1], "history": res.history}
         R_raw.append(rr); R_norm.append(rn); T.append(tt)
         rec = ExecutionRecord(
         case_id=case_id, family_id=family_id, split_group=split_group, backend=backend, theta=theta,
@@ -246,6 +250,7 @@ def evaluate(plant_factory, spec, library, worlds, theta, case_id, family_id, sp
         timestamps={k: v["timestamps"] for k, v in runs.items()},
         events={k: {"termination": v["termination"], "events": v["events"]} for k, v in runs.items()},
         traces={k: {"final": v["final"], "margin": v["margin"], **({"route_goal_completed": v["route_goal_completed"]}
-                                                               if v["route_goal_completed"] is not None else {})} for k, v in runs.items()},
+                                                               if v["route_goal_completed"] is not None else {}),
+                    **({"history": v["history"]} if v["history"] is not None else {})} for k, v in runs.items()},
         invalid_reasons=invalid, parent_family_id=parent_family_id, varied_factor=varied_factor)
     return rec.finalize(cfg.eps)
