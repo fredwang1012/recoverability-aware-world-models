@@ -1,13 +1,61 @@
-# Approach 1 - simulation mining of unrecoverable scenes (CARLA, headless)
+# mining
 
-Files
-- core.py          scenario space theta, causal recovery policies, margin G, oracle V, categories, mock backend
-- algos.py         the search algorithms (ask/tell, simulator-agnostic)
-- carla_backend.py CARLA 0.9.16 backend (UNTESTED against a live server - see "First run")
-- run.py           driver: batching, CSV checkpoints, server pool, metrics, plots, --bench
+The Python package behind every result: the recoverability contract, the margin G, one harness for every simulator, the case builders for RC01–RC20, the mining algorithms and the dataset export. Run scripts from this folder so outputs land in `results/` here (see [`../scripts/README.md`](../scripts/README.md)).
+
+## Core definitions
+
+| Module | Role |
+| --- | --- |
+| `contract.py` | The recoverability contract from the PDF: `classify(R)` turns the matrix of G values (moves × worlds) into V, V_hind, info_gap and the evidence class (R_REF, U_LIBRARY, U_INFORMATION, UNRESOLVED) |
+| `margin.py` | Label-grade margin G: oriented-box clearance with swept checks, road edges, dynamic limits, terminal test. `DEFAULT_V2` holds the constants |
+| `records.py` | ExecutionRecord (one evaluated scene), with checksum and `finalize()` that calls `contract.classify` |
+| `validate_records.py` | Schema and consistency checks for record files |
+
+## Simulation (`sim/`)
+
+| Module | Role |
+| --- | --- |
+| `harness.py` | `run_episode` (one move in one world) and `evaluate` (every move × every world → one record) |
+| `plant_carla.py` | CARLA 0.9.16 plant: spawn, warm-up, calibrated braking, step, collision events |
+| `plant_kinematic.py` | Deterministic kinematic-bicycle plant with the same interface (mock; used by the tests) |
+| `bringup.py` | Connect, build the custom site, calibrate, selftest, determinism, timing |
+| `sites.py` | Finds the straight two-lane stretch and converts road ↔ world coordinates |
+| `policies.py` | The move library (brake_hold, bypass, staged changes, wait/observe, memory policies, …); policies see only delivered observations |
+| `actors.py` | Finite-state controllers for the other vehicles (cruise, yield, pass, …) |
+| `queues.py` | Observation delivery (rate, delay, reveal / forget for hidden actors) and the command pipeline (planning and actuation delay) |
+| `trackers.py`, `types.py` | Low-level speed and lane controllers; shared types |
+| `video.py` | Camera recording for the case videos (visual only) |
+| `assets/straight_2lane.xodr` | The custom OpenDRIVE road (1.5 km, two same-direction lanes) |
+
+## Cases (`cases/`)
+
+`catalogue.yaml` is the PDF's 20 cases as data (intentions only, never labels). Each builder makes the scene spec, the move library and the worlds:
+
+| Module | Cases |
+| --- | --- |
+| `corridor.py` | RC01, RC02, RC12, RC17 |
+| `two_lane.py` | RC03, RC07, RC16, RC19, RC20 |
+| `compositional.py` | RC04, RC05, RC06, RC08, RC15, RC18 |
+| `occlusion.py` | RC10, RC11, RC14 |
+| `negatives.py` | RC09, RC13 (and the RC13 predictor, outside the labelling) |
+
+## Mining and export
+
+| Module | Role |
+| --- | --- |
+| `algos.py` | Ask/tell search algorithms: sobol, cem, bo_lcb, straddle, qd_fail, qd_boundary, bisect |
+| `families.py` | Parameter spaces in [0,1]^d for the mined families (corridor, rc03, rc07; CARLA variants) |
+| `infogap.py` | Info-gap (V_hind − V) objective helpers for the RC10/RC11 family |
+| `export.py`, `splits.py`, `validate_dataset.py` | E1 dataset export, split groups that keep counterfactual neighbours together, dataset validation |
+| `reference/` | Closed-form reference models (corridor stopping distance, information tree) used as analytic anchors |
+
+## Earlier version (still used by tests)
+
+`core.py`, `carla_backend.py`, `run.py`, `replay_scene.py` are the first mock-only mining pipeline. Its results are in `../results/mock/`; the CARLA work above replaced it.
 
 ## Algorithms and the papers behind them
-Verified by web search this session:
+
+Checked against the papers (October 2026):
 - Corso, Moss, Koren, Lee, Kochenderfer. A Survey of Algorithms for Black-Box Safety Validation of CPS. JAIR 2021. arXiv:2005.02979  -> sobol baseline, cem, bo_lcb
 - Bryan, Schneider, Nichol, Moore, Schneider. Active Learning for Identifying Function Threshold Boundaries. NIPS 2005  -> straddle
 - Inatsu et al. Active Learning for Level Set Estimation Using Randomized Straddle Algorithms. TMLR 2024. arXiv:2408.03144  -> randomized beta ~ chi2(2)
@@ -26,10 +74,3 @@ Project-specific (no paper): bisect = one-factor boundary bisection that yields 
 Not implemented on purpose: AST/MCTS. It searches over a *sequence* of stochastic disturbances; our theta is a static
 parameter vector. It becomes the right tool once the hidden car's behaviour is a per-step disturbance (occluded-actor family).
 
-## First run on CARLA
-1. ./CarlaUE4.sh -RenderOffScreen -nosound -carla-rpc-port=2000      (one per port for parallelism)
-2. python carla_backend.py --calibrate      (measures decel vs tire friction -> friction_calibration.json)
-3. python carla_backend.py --selftest       (check: keep holds speed, brake decel ~ brake_limit, left_now ends at lat ~ -lane_w)
-4. python run.py --backend carla --ports 2000,2002 --algos sobol,straddle,bisect --budget 60 --out carla_try
-5. then the full list, --profiles to attach full R(h) to every mined scene.
-If step 3 looks wrong, fix the backend before trusting any CARLA numbers; the mock results say nothing about CARLA dynamics.

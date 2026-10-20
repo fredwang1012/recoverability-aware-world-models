@@ -508,43 +508,43 @@ Locations: CARLA `mining/results/carla/dataset/`; mock `results/mock/dataset/` (
 
 ## 7. Known issues, caveats and surprises
 
-**ego_hl change (commit e81aa9d).** `_obstacle_passed` (commit e81aa9d) now uses the delivered `ego_hl` instead of the literal 2.3 m; the CARLA ego (vehicle.tesla.model3) delivers 2.3959 m (bounding-box extent, so the pass test shifts by 0.096 m).  RC03 (all scans, closed-lane records) and RC20 were re-run under the tag `al8hl`; the 313 earlier records matching a re-run key are kept as `*_al8_prehl_superseded.jsonl` and are not used.  Compared key by key: 0 evidence-class changes; 60 policy margins differ at all, 15 of them for brake_hold, which never reads ego_hl, so the differences are CARLA run-to-run variation, not an ego_hl effect; largest change of a finite margin 0.196.  The RC07/RC12/RC19 sweeps were not re-run here (RC07 was re-run on the same code earlier).  The RC03 v = 18 witness (gap 30, lc_time 2) survives the re-run: brake_hold -inf, bypass_left margin 0.008, R_REF (no re-tuning). Only `bypass_then_stop` and `bypass_then_return` read `ego_hl` through `_obstacle_passed`, and only the RC07 library contains them (re-run earlier); the RC03, RC20, corridor and rc03 mining libraries do not call it, so the shift of about 0.1 m (2.3959 - 2.3 = 0.096 m) cannot enter them directly (the re-run differences above are run-to-run variation). The rc03 and corridor mining records (`mining/rc03`, `mining/corridor`) predate the change and were not re-run.
+**ego_hl change (commit e81aa9d).** `_obstacle_passed` (commit e81aa9d) now uses the delivered `ego_hl` instead of the literal 2.3 m; the CARLA ego (vehicle.tesla.model3) delivers 2.3959 m (bounding-box extent, so the pass test shifts by 0.096 m).  RC03 (all scans, closed-lane records) and RC20 were re-run under the tag `al8hl`; the 313 earlier records matching a re-run key are kept as `*_al8_prehl_superseded.jsonl` and are not used.  Compared key by key: 0 evidence-class changes; 60 policy margins differ at all, 15 of them for brake_hold, which never reads ego_hl, so the differences are CARLA run-to-run variation, not an ego_hl effect; largest change of a finite margin 0.196.  The RC07/RC12/RC19 sweeps were not re-run here (RC07 was re-run on the same code earlier).  The RC03 v = 18 witness (gap 30, lc_time 2) survives the re-run: brake_hold -inf, bypass_left margin 0.008, R_REF (no re-tuning). `_obstacle_passed` (used by `bypass_then_stop` and `bypass_then_return`, only in the RC07 library, re-run earlier) was the only place that used the literal 2.3 m; the other readers of `ego_hl` (`sim/policies.py` lines 218, 322 and 337: wait_observe_enter, abort_if_closing and the hidden-object branch policies) always used the delivered value, so they were never affected. The RC03, RC20, corridor and rc03 mining libraries do not call `_obstacle_passed`, so the shift of about 0.1 m (2.3959 - 2.3 = 0.096 m) cannot enter them directly (the re-run differences above are run-to-run variation). The rc03 and corridor mining records (`mining/rc03`, `mining/corridor`) predate the change and were not re-run.
 
 **Repeatability.** RC13: 2 of 4 scenes keep every witness margin at or above the max observed spread 0.028 ((14.0, 19.0, 0.1), (18.0, 28.0, 0.2)); the scenes inside it are (14.0, 20.0, 0.2) (smallest margin 0.0224), (18.0, 26.0, 0.2) (smallest margin 0.0182). negatives.md calls all 4 'robust' only because it applied sigma = 0.0167; at 0.028 the robust count is 2 of 4.
 
-**Repeatability (spread).** The Task 5 D4 sigma (0.0167 margin units, from corridor and rc03 repeats) is superseded: the maximum observed CARLA repeat spread across all tasks is **0.028 margin units**, RC13 scene (v 14, D 20, t_reveal 0.2), witness world B ranging 0.0224 .. 0.0504 over four runs (`negatives.md`). It is about 1.7 times the Task 5 sigma. Cost if wrong: claims whose margin is below this spread may not be reproducible. Headline claims whose margin is below 0.028 (computed from the margins in the md files):
+**Repeatability (spread).** The Task 5 D4 sigma (0.0167 margin units, from corridor and rc03 repeats) is superseded: the maximum observed CARLA repeat spread within one server session is **0.028 margin units**, RC13 scene (v 14, D 20, t_reveal 0.2), witness world B ranging 0.0224 .. 0.0504 over four runs (`negatives.md`). It is about 1.7 times the Task 5 sigma. **Across server sessions the shift is larger: 0.196** (RC03 v 8, lc_time 1.2, gap 10.5: brake_steer_left went from +0.00989 to -0.18653 when the server was restarted and the scan re-run; no case label changed because other policies still carried those scenes). Cost if wrong: claims whose margin is below these spreads may not be reproducible. Headline claims checked against both figures (computed from the margins in the md files):
 
-| headline claim | margin | inside max observed spread (abs margin < 0.028)? | source |
-|---|---|---|---|
-| RC13 scene (14.0, 19.0, 0.1): smallest witness margin over repeats and worlds | +0.0490 | no | negatives.md, Repeatability |
-| RC13 scene (14.0, 20.0, 0.2): smallest witness margin over repeats and worlds | +0.0224 | **yes** | negatives.md, Repeatability |
-| RC13 scene (18.0, 26.0, 0.2): smallest witness margin over repeats and worlds | +0.0182 | **yes** | negatives.md, Repeatability |
-| RC13 scene (18.0, 28.0, 0.2): smallest witness margin over repeats and worlds | +0.1046 | no | negatives.md, Repeatability |
-| RC09 open-left control witness (bypass_left_lc2) | +0.0222 | **yes** | negatives.md, Controls |
-| RC03 witness at v 18, gap 30 (bypass_left) | +0.0080 | **yes** | core.md, RC03 chosen witnesses |
-| RC06 named witness wait_observe_enter (scene 60/20/16; the scene also has wait_brake_observe_enter at 0.105, so the label stands) | +0.0170 | **yes** | compositional.md, RC06 |
-| D5 CARLA info-gap scene D 26.8, v 17.1, t_reveal 0.7 (cem s1): V_hind (hindsight witness) | +0.1050 | no | mining/infogap/infogap.md |
-| D5 CARLA info-gap scene D 26.8, v 17.1, t_reveal 0.7 (cem s1): V (negative side) | -0.0830 | no | mining/infogap/infogap.md |
-| D5 CARLA info-gap scene D 30.6, v 17.9, t_reveal 1.1 (straddle s1): V_hind (hindsight witness) | +0.1360 | no | mining/infogap/infogap.md |
-| D5 CARLA info-gap scene D 30.6, v 17.9, t_reveal 1.1 (straddle s1): V (negative side) | -0.0400 | no | mining/infogap/infogap.md |
-| D5 CARLA info-gap scene D 22.6, v 16.1, t_reveal 0.55 (cem s1): V_hind (hindsight witness) | +0.0850 | no | mining/infogap/infogap.md |
-| D5 CARLA info-gap scene D 23.9, v 17.2, t_reveal 1.05 (straddle s1): V_hind (hindsight witness) | +0.0630 | no | mining/infogap/infogap.md |
-| D5 CARLA info-gap scene D 24.4, v 17.6, t_reveal 0.5 (straddle s1): V_hind (hindsight witness) | +0.0550 | no | mining/infogap/infogap.md |
-| D5 CARLA info-gap scene D 20.8, v 16, t_reveal 0.75 (cem s1): V_hind (hindsight witness) | +0.0020 | **yes** | mining/infogap/infogap.md |
-| Task 7 sweep v 14, D 18, t_reveal 0: R_REF, V | +0.0250 | **yes** | occlusion.md, full margins |
-| Task 7 sweep v 14, D 18, t_reveal 0.1: U_INFORMATION, V (transition bracket edge) | -0.0420 | no | occlusion.md, full margins |
-| Task 7 sweep v 14, D 19, t_reveal 0.1: R_REF, V | +0.0490 | no | occlusion.md, full margins |
-| Task 7 sweep v 14, D 19, t_reveal 0.2: U_INFORMATION, V (transition bracket edge) | -0.0020 | **yes** | occlusion.md, full margins |
-| Task 7 sweep v 14, D 20, t_reveal 0.2: R_REF, V | +0.0500 | no | occlusion.md, full margins |
-| Task 7 sweep v 14, D 20, t_reveal 0.3: R_REF, V | +0.0360 | no | occlusion.md, full margins |
-| Task 7 sweep v 14, D 20, t_reveal 0.5: U_INFORMATION, V (transition bracket edge) | -0.0300 | no | occlusion.md, full margins |
-| Task 7 sweep v 18, D 26, t_reveal 0.2: R_REF, V | +0.0180 | **yes** | occlusion.md, full margins |
-| Task 7 sweep v 18, D 28, t_reveal 0.4: R_REF, V | +0.0480 | no | occlusion.md, full margins |
-| Task 7 sweep v 18, D 30, t_reveal 0.8: R_REF, V | +0.0090 | **yes** | occlusion.md, full margins |
+| headline claim | margin | inside the within-session spread (abs margin < 0.028)? | inside the cross-session shift (abs margin < 0.196)? | source |
+|---|---|---|---|---|
+| RC13 scene (14.0, 19.0, 0.1): smallest witness margin over repeats and worlds | +0.0490 | no | **yes** | negatives.md, Repeatability |
+| RC13 scene (14.0, 20.0, 0.2): smallest witness margin over repeats and worlds | +0.0224 | **yes** | **yes** | negatives.md, Repeatability |
+| RC13 scene (18.0, 26.0, 0.2): smallest witness margin over repeats and worlds | +0.0182 | **yes** | **yes** | negatives.md, Repeatability |
+| RC13 scene (18.0, 28.0, 0.2): smallest witness margin over repeats and worlds | +0.1046 | no | **yes** | negatives.md, Repeatability |
+| RC09 open-left control witness (bypass_left_lc2) | +0.0222 | **yes** | **yes** | negatives.md, Controls |
+| RC03 witness at v 18, gap 30 (bypass_left) | +0.0080 | **yes** | **yes** | core.md, RC03 chosen witnesses |
+| RC06 named witness wait_observe_enter (scene 60/20/16; the scene also has wait_brake_observe_enter at 0.105, so the label stands) | +0.0170 | **yes** | **yes** | compositional.md, RC06 |
+| D5 CARLA info-gap scene D 26.8, v 17.1, t_reveal 0.7 (cem s1): V_hind (hindsight witness) | +0.1050 | no | **yes** | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 26.8, v 17.1, t_reveal 0.7 (cem s1): V (negative side) | -0.0830 | no | **yes** | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 30.6, v 17.9, t_reveal 1.1 (straddle s1): V_hind (hindsight witness) | +0.1360 | no | **yes** | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 30.6, v 17.9, t_reveal 1.1 (straddle s1): V (negative side) | -0.0400 | no | **yes** | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 22.6, v 16.1, t_reveal 0.55 (cem s1): V_hind (hindsight witness) | +0.0850 | no | **yes** | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 23.9, v 17.2, t_reveal 1.05 (straddle s1): V_hind (hindsight witness) | +0.0630 | no | **yes** | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 24.4, v 17.6, t_reveal 0.5 (straddle s1): V_hind (hindsight witness) | +0.0550 | no | **yes** | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 20.8, v 16, t_reveal 0.75 (cem s1): V_hind (hindsight witness) | +0.0020 | **yes** | **yes** | mining/infogap/infogap.md |
+| Task 7 sweep v 14, D 18, t_reveal 0: R_REF, V | +0.0250 | **yes** | **yes** | occlusion.md, full margins |
+| Task 7 sweep v 14, D 18, t_reveal 0.1: U_INFORMATION, V (transition bracket edge) | -0.0420 | no | **yes** | occlusion.md, full margins |
+| Task 7 sweep v 14, D 19, t_reveal 0.1: R_REF, V | +0.0490 | no | **yes** | occlusion.md, full margins |
+| Task 7 sweep v 14, D 19, t_reveal 0.2: U_INFORMATION, V (transition bracket edge) | -0.0020 | **yes** | **yes** | occlusion.md, full margins |
+| Task 7 sweep v 14, D 20, t_reveal 0.2: R_REF, V | +0.0500 | no | **yes** | occlusion.md, full margins |
+| Task 7 sweep v 14, D 20, t_reveal 0.3: R_REF, V | +0.0360 | no | **yes** | occlusion.md, full margins |
+| Task 7 sweep v 14, D 20, t_reveal 0.5: U_INFORMATION, V (transition bracket edge) | -0.0300 | no | **yes** | occlusion.md, full margins |
+| Task 7 sweep v 18, D 26, t_reveal 0.2: R_REF, V | +0.0180 | **yes** | **yes** | occlusion.md, full margins |
+| Task 7 sweep v 18, D 28, t_reveal 0.4: R_REF, V | +0.0480 | no | **yes** | occlusion.md, full margins |
+| Task 7 sweep v 18, D 30, t_reveal 0.8: R_REF, V | +0.0090 | **yes** | **yes** | occlusion.md, full margins |
 
-10 of the 25 listed margins are inside the spread. (Rows with margins up to twice the spread are listed so the reader can see how close the others are.)
+10 of the 25 listed margins are inside the within-session spread; 25 of 25 are inside the cross-session shift, so those labels hold for the server session that produced them and could flip in a new one. (Rows with margins up to twice the within-session spread are listed so the reader can see how close the others are.)
 
-CARLA is not bit-reproducible: a minority of repeated scenes (23 of 109 repeated scenes (about 21%) showed spread in some repeat: 9 of 32 corridor and 14 of 77 rc03 rows) show a changed value within a session (sigma 0.0833 m in the corridor units); same-server determinism cases were exact, and cross-session repeats were not measured systematically (the RC12 spread check of 10 scenes of one family is mostly saturated and proves nothing about cross-session spread).
+CARLA is not bit-reproducible: a minority of repeated scenes (23 of 109 repeated scenes (about 21%) showed spread in some repeat: 9 of 32 corridor and 14 of 77 rc03 rows) show a changed value within a session (sigma 0.0833 m in the corridor units); same-server determinism cases were exact, and cross-session repeats were not measured systematically beyond the RC03/RC20 re-run that gave the 0.196 shift (the RC12 spread check of 10 scenes of one family is mostly saturated and proves nothing about cross-session spread).
 
 **Plant.**
 - Moving actors start 3.2-5.3% below their declared speed (warm-up drag, pinned each warm-up tick; measured first-tick speeds in `compositional.md`: RC05 5.3%, RC06 3.2%, RC15 3.2% low); measured t0 speeds are in the md files. Declared actor speeds are nominal upper bounds. RC07 was re-run on the fixed plant (it first ran with the rear actor about 15% slow); its scene moved to rear_gap 100 and the earlier (34, 80, 18) scene no longer holds.

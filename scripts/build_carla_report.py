@@ -17,7 +17,8 @@ sys.path.insert(0, os.path.join(ROOT, "mining"))
 import splits
 CARLA = os.path.join(ROOT, "mining", "results", "carla")
 MOCK = os.path.join(ROOT, "results", "mock")
-MAX_SPREAD = 0.028          # RC13 scene (14, 20, 0.2), witness world B 0.0224 .. 0.0504 (negatives.md); exceeds the Task 5 sigma 0.0167
+CROSS_SPREAD = 0.196        # largest same-theta shift ACROSS server sessions: RC03 v 8, lc 1.2, gap 10.5, brake_steer_left +0.00989 -> -0.18653 (al8 vs al8hl re-run)
+MAX_SPREAD = 0.028          # within ONE server session: RC13 scene (14, 20, 0.2), witness world B 0.0224 .. 0.0504 (negatives.md); exceeds the Task 5 sigma 0.0167
 
 
 def rd(*p):
@@ -118,11 +119,15 @@ def flag_rows():
 
 def flags_table():
     rows = flag_rows()
-    L = ["| headline claim | margin | inside max observed spread (abs margin < 0.028)? | source |", "|---|---|---|---|"]
+    L = [f"| headline claim | margin | inside the within-session spread (abs margin < {MAX_SPREAD})? | inside the cross-session shift (abs margin < {CROSS_SPREAD})? | source |",
+         "|---|---|---|---|---|"]
     for name, m, src in rows:
-        L.append(f"| {name} | {m:+.4f} | {'**yes**' if abs(m) < MAX_SPREAD else 'no'} | {src} |")
+        L.append(f"| {name} | {m:+.4f} | {'**yes**' if abs(m) < MAX_SPREAD else 'no'} | {'**yes**' if abs(m) < CROSS_SPREAD else 'no'} | {src} |")
     n = sum(abs(m) < MAX_SPREAD for _, m, _ in rows)
-    return "\n".join(L) + f"\n\n{n} of the {len(rows)} listed margins are inside the spread. (Rows with margins up to twice the spread are listed so the reader can see how close the others are.)"
+    nx = sum(abs(m) < CROSS_SPREAD for _, m, _ in rows)
+    return "\n".join(L) + (f"\n\n{n} of the {len(rows)} listed margins are inside the within-session spread; {nx} of {len(rows)} are inside the cross-session shift, "
+                           "so those labels hold for the server session that produced them and could flip in a new one. (Rows with margins up to twice the "
+                           "within-session spread are listed so the reader can see how close the others are.)")
 
 
 def pairs_table():
@@ -174,8 +179,9 @@ def hl_note():
     note = re.search(r"^\*\*RC03/RC20 re-run after the ego_hl change\.\*\*(.*)$", core, re.M).group(1).strip()
     wit = re.search(r"^\| 18 \| 2 \| 30 \| (\S+) \| bypass_left ([\d.]+) \|.*\| (R_REF) \|", core, re.M)
     return ("**ego_hl change (commit e81aa9d).** " + note + f"  The RC03 v = 18 witness (gap 30, lc_time 2) survives the re-run: brake_hold {wit.group(1)}, bypass_left margin {wit.group(2)}, {wit.group(3)} "
-            "(no re-tuning). Only `bypass_then_stop` and `bypass_then_return` read `ego_hl` through `_obstacle_passed`, and only the RC07 library contains them (re-run earlier); "
-            "the RC03, RC20, corridor and rc03 mining libraries do not call it, so the shift of about 0.1 m (2.3959 - 2.3 = 0.096 m) cannot enter them directly (the re-run differences above are run-to-run variation). The rc03 and corridor mining records (`mining/rc03`, `mining/corridor`) predate the change and were not re-run.")
+            "(no re-tuning). `_obstacle_passed` (used by `bypass_then_stop` and `bypass_then_return`, only in the RC07 library, re-run earlier) was the only place that used the "
+            "literal 2.3 m; the other readers of `ego_hl` (`sim/policies.py` lines 218, 322 and 337: wait_observe_enter, abort_if_closing and the hidden-object branch policies) "
+            "always used the delivered value, so they were never affected. The RC03, RC20, corridor and rc03 mining libraries do not call `_obstacle_passed`, so the shift of about 0.1 m (2.3959 - 2.3 = 0.096 m) cannot enter them directly (the re-run differences above are run-to-run variation). The rc03 and corridor mining records (`mining/rc03`, `mining/corridor`) predate the change and were not re-run.")
 
 
 def main():
@@ -215,7 +221,7 @@ def main():
         "TRANSITIONS": transitions_table(), "OCC_MIX": ", ".join(f"{k} = {v}" for k, v in sorted(evidence_mix_occ().items())),
         "FLAGS": flags_table(), "RC13_SUMMARY": rc13_summary(), "PAIRS": pairs_table(),
         "SIGMA028": rd(CARLA, "mining", "sigma028.md").split("\n", 2)[2].replace("### ", "#### "), "IG_CARLA": ig_c.replace("## D5", "### D5", 1), "IG_MOCK": ig_m.replace("## D5", "### D5", 1),
-        "HL_NOTE": hl_note(), "DS": json.dumps(ds, indent=1), "D5_READING": rd(ROOT, "docs", "carla_results_d5_reading.md").strip(), "MAX_SPREAD": f"{MAX_SPREAD}",
+        "CROSS_SPREAD": f"{CROSS_SPREAD}", "HL_NOTE": hl_note(), "DS": json.dumps(ds, indent=1), "D5_READING": rd(ROOT, "docs", "carla_results_d5_reading.md").strip(), "MAX_SPREAD": f"{MAX_SPREAD}",
     }
     for k, v in sub.items():
         tpl = tpl.replace("{{" + k + "}}", v)

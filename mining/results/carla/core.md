@@ -509,7 +509,7 @@ Selection rule: among full-contrast scenes take the highest rear_v, then the med
 - bypass_then_return: termination horizon, contacted none, peak abs a_lat 5.63 m/s^2
 - brake_hold: termination horizon, contacted none, peak abs a_lat 0.00 m/s^2
 
-Measured rear speed (per-tick spy over the policy episodes, 245 ticks): nominal 18, at start 17.14, max 18.81, mean 17.93 m/s.  brake_hold also passes in place at gap 34, so the scene stays R_REF (one refuted policy never makes a scene unrecoverable).
+Measured rear speed (per-tick spy over one policy episode, 245 ticks): nominal 18, at start 17.14, max 18.81, mean 17.93 m/s.  brake_hold also passes in place at gap 34, so the scene stays R_REF (one refuted policy never makes a scene unrecoverable).
 
 ## RC12: baseline-keep prefix before braking (corridor, gap 40, v 12, tau 0.25, brake_hold@prefix)
 

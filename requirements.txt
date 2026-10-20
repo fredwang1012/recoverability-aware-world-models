@@ -7,4 +7,6 @@ pandas
 matplotlib
 pyyaml
 pytest
-carla==0.9.16   # cp312 wheel only; needs a CARLA 0.9.16 server (see docs/carla_setup.md)
+imageio          # case videos (scripts/carla_videos.py)
+imageio-ffmpeg
+carla==0.9.16   # cp312 wheel only; needs a CARLA 0.9.16 server (see docs/CARLA_SETUP.md)

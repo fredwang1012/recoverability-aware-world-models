@@ -12,7 +12,7 @@ DIFFERS rows: 0
 | RC03_bypass_left.mp4 | RC03 | bypass_left | static_blocker | SAFE: margin G = +0.008 | +0.008 | +0.008 | agree |
 | RC03_brake_hold.mp4 | RC03 | brake_hold | static_blocker | FAILS: collision | -inf | -inf | agree |
 | RC04_staged_brake_0.2_change.mp4 | RC04 | staged_brake_0.2_change | static_blocker | SAFE: margin G = +0.023 | +0.023 | +0.023 | agree |
-| RC04_immediate_lane_change.mp4 | RC04 | immediate_lane_change | static_blocker | SAFE: margin G = +0.068 | +0.068 | +0.068 | agree |
+| RC04_immediate_lane_change.mp4 | RC04 | immediate_lane_change | static_blocker | SAFE: margin G = +0.069 | +0.069 | +0.068 | agree |
 | RC05_abort_and_stabilize_gap_closes.mp4 | RC05 | abort_and_stabilize | gap_closes | SAFE: margin G = +0.105 | +0.105 | +0.105 | agree |
 | RC05_commit_lane_change_gap_closes.mp4 | RC05 | commit_lane_change | gap_closes | FAILS: collision | -inf | -inf | agree |
 | RC06_wait_observe_enter.mp4 | RC06 | wait_observe_enter | passer_cruise | SAFE: margin G = +0.017 | +0.017 | +0.017 | agree |
@@ -36,8 +36,8 @@ DIFFERS rows: 0
 | RC16_lane_follow.mp4 | RC16 | lane_follow | static_blocker | FAILS: margin G = -0.155 (below 0) | -0.155 | -0.155 | agree |
 | RC17_brake_hold_tau0.40.mp4 | RC17 | brake_hold | stationary_blocker_no_rear | SAFE: margin G = +0.068 | +0.068 | +0.068 | agree |
 | RC17_brake_hold_tau0.45.mp4 | RC17 | brake_hold | stationary_blocker_no_rear | FAILS: margin G = -0.061 (below 0) | -0.061 | -0.061 | agree |
-| RC18_bypass_left.mp4 | RC18 | bypass_left | static_blocker | SAFE: margin G = +0.068 | +0.068 | +0.068 | agree |
-| RC18_brake_steer_cmd_lc2_b1.mp4 | RC18 | brake_steer_cmd_lc2_b1 | static_blocker | FAILS: margin G = -0.339 (below 0) | -0.339 | -0.339 | agree |
+| RC18_bypass_left.mp4 | RC18 | bypass_left | static_blocker | SAFE: margin G = +0.066 | +0.066 | +0.068 | agree |
+| RC18_brake_steer_cmd_lc2_b1.mp4 | RC18 | brake_steer_cmd_lc2_b1 | static_blocker | FAILS: margin G = -0.343 (below 0) | -0.343 | -0.339 | agree |
 | RC19_lane_follow_anchor.mp4 | RC19 | lane_follow | static_blocker | SAFE: margin G = +0.668 | +0.668 | +0.668 | agree |
 | RC19_lane_follow_nuisance.mp4 | RC19 | lane_follow | static_blocker | SAFE: margin G = +0.668 | +0.668 | +0.668 | agree |
 | RC20_brake_hold_restricted.mp4 | RC20 | brake_hold | static_blocker | FAILS: collision | -inf | -inf | agree |

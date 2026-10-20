@@ -478,7 +478,7 @@ def report(ctx, r03, r07, r12, r19, r20):
         for pol in ("bypass_left", "bypass_then_stop", "bypass_then_return", "brake_hold"):
             tm, oth = term(r, pol)
             w(f"- {pol}: termination {tm}, contacted {oth or 'none'}, peak abs a_lat {fp(peak_alat(r, pol))} m/s^2")
-        w(f"\nMeasured rear speed (per-tick spy over the policy episodes, {rv['n']} ticks): nominal {rv['nominal']:g}, at start {rv['start']:.2f}, max {rv['max']:.2f}, mean {rv['mean']:.2f} m/s.  "
+        w(f"\nMeasured rear speed (per-tick spy over one policy episode, {rv['n']} ticks): nominal {rv['nominal']:g}, at start {rv['start']:.2f}, max {rv['max']:.2f}, mean {rv['mean']:.2f} m/s.  "
           f"brake_hold also passes in place at gap {t['gap_m']:g}, so the scene stays {r['evidence_class']} (one refuted policy never makes a scene unrecoverable).\n")
     w("## RC12: baseline-keep prefix before braking (corridor, gap 40, v 12, tau 0.25, brake_hold@prefix)\n")
     s, tp = r12["summary"], t_p_star(40.0, 12.0)

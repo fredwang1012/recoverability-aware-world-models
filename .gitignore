@@ -1,6 +1,15 @@
+# environments and caches
 .venv/
-results/
 __pycache__/
 *.pyc
-files*.zip
+.idea/
+
+# run outputs: everything under any results/ folder is ignored by default.
+# The summaries worth keeping (md tables, figures, small json) are added with `git add -f`;
+# raw checkpoints (*.jsonl), datasets and videos stay local.
+results/
 *.mp4
+
+# scratch
+files*.zip
+.superpowers/
