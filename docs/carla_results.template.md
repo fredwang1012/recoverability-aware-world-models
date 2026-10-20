@@ -34,7 +34,7 @@ PASS = criterion met as stated; WARN = met with a caveat listed in section 7; NO
 | 5 | RC07 mining family | NOT EXECUTED | optional in Task 5, skipped |
 | 5 | qd_fail and qd_boundary on CARLA | NOT EXECUTED | not run on CARLA (exist in `algos.REGISTRY`, mock only) |
 | 5 | G sensitivity on CARLA | NOT EXECUTED | only the mock files `results/g_sensitivity*.md` exist; no CARLA G-sensitivity file was produced |
-| 6 | RC05, RC06, RC08, RC15, RC18 | WARN | `compositional.md`; moving actors start 3-5% low; RC18 limits declared, a_comb mask |
+| 6 | RC05, RC06, RC08, RC15, RC18 | WARN | `compositional.md`; moving actors start 3.2-5.3% low (compositional.md); RC18 limits declared, a_comb mask |
 | 6 | RC04 | WARN | no CARLA positive witness after 92 scanned scenes (reported, not forced) |
 | 7 | RC10, RC11, RC14 and the reveal-time transition | WARN | `occlusion.md`, `occlusion_transition.png`; the transition is shown, but the 0.25 s cross-check tolerance cannot be verified as pre-declared (single commit) and the analytic t* lies before the measured bracket in 4 of 6 scenes (a one-sided conservative bound, +0.05..+0.22 s), so the cross-check is weaker than a match |
 | 8 | RC09 (25-member class refuted), RC13 | WARN | `negatives.md`; two headline margins inside the observed repeat spread |
@@ -167,6 +167,8 @@ Locations: CARLA `mining/results/carla/dataset/`; mock `results/mock/dataset/` (
 
 ## 7. Known issues, caveats and surprises
 
+{{HL_NOTE}}
+
 **Repeatability.** {{RC13_SUMMARY}}
 
 **Repeatability (spread).** The Task 5 D4 sigma (0.0167 margin units, from corridor and rc03 repeats) is superseded: the maximum observed CARLA repeat spread across all tasks is **{{MAX_SPREAD}} margin units**, RC13 scene (v 14, D 20, t_reveal 0.2), witness world B ranging 0.0224 .. 0.0504 over four runs (`negatives.md`). It is about 1.7 times the Task 5 sigma. Cost if wrong: claims whose margin is below this spread may not be reproducible. Headline claims whose margin is below 0.028 (computed from the margins in the md files):
@@ -176,7 +178,7 @@ Locations: CARLA `mining/results/carla/dataset/`; mock `results/mock/dataset/` (
 CARLA is not bit-reproducible: a minority of repeated scenes (23 of 109 repeated scenes (about 21%) showed spread in some repeat: 9 of 32 corridor and 14 of 77 rc03 rows) show a changed value within a session (sigma 0.0833 m in the corridor units); same-server determinism cases were exact, and cross-session repeats were not measured systematically (the RC12 spread check of 10 scenes of one family is mostly saturated and proves nothing about cross-session spread).
 
 **Plant.**
-- Moving actors start 3-5% below their declared speed (warm-up drag, pinned each warm-up tick); residual 2.5-5%; measured t0 speeds are in the md files. Declared actor speeds are nominal upper bounds. RC07 was re-run on the fixed plant (it first ran with the rear actor about 15% slow); its scene moved to rear_gap 100 and the earlier (34, 80, 18) scene no longer holds.
+- Moving actors start 3.2-5.3% below their declared speed (warm-up drag, pinned each warm-up tick; measured first-tick speeds in `compositional.md`: RC05 5.3%, RC06 3.2%, RC15 3.2% low); measured t0 speeds are in the md files. Declared actor speeds are nominal upper bounds. RC07 was re-run on the fixed plant (it first ran with the rear actor about 15% slow); its scene moved to rear_gap 100 and the earlier (34, 80, 18) scene no longer holds.
 - Within-session non-determinism, see above.
 - `tire_friction` 5.0 is non-physical and the high-decel range is a torque-knob abstraction; CARLA's brake model locks the wheels near the end of a stop (decel spikes -28..-35 m/s^2 below about 4.3 m/s). The measured decel is about 5 m/s^2 at speed, so the constant-b formula is a distance-equivalent calibration (b_cal 6.211), not a physical constant.
 - The actuation limits `a_lat_max = 8.0` and `a_comb_max = 8.0` m/s^2 are declared, not physical, bounds (recorded in every record's `geometry.spec`). Cost if wrong: the RC03/RC20 windows and the RC18 contrast depend on them.
@@ -196,7 +198,7 @@ CARLA is not bit-reproducible: a minority of repeated scenes (23 of 109 repeated
 - Raw `*.jsonl` records are git-ignored, so md tables are not re-verifiable from a clone (also the RC18 variant (a) rests on report text).
 - `d4_repeats.jsonl` is untracked; "original values in the current session" in D4 is unverified (originals may predate a restart).
 - Mixed server sessions: RC12 and RC19 from the earlier session; `Ctx.point` cache keys omit library id and `a_lat_max` (guarded by sweep-name tags); superseded files are excluded from validation by name only.
-- `core_before_rc07_rerun.md` is a verbatim copy of the pre-fix core report.
+- The pre-fix core report (before the RC07 re-run) is no longer kept as a file; it is in git history at commit 21719eb (`mining/results/carla/core.md`).
 - Minor open items: RC16 point-model column is constant True; `foundation.md` preamble still mentions an older bisection step; the RC18 refuted-by-comb column covers only the brake_steer policies; brake-onset smoothed a_long 8.79 vs decel target 6.19 is unexplained; Task 7 figure cosmetics; `negatives.md` prose "sigma is a conservative bound" is contradicted by the 0.028 spread (this report supersedes it).
 - Task 1 (deferred minors): `measure_brake` keeps an invalid-start fit when its retries run out (`bringup.py` lines 50-52); the extra-tick guard in `plant_carla.py` (line 306) mismatches and the non-monotone branch has no test; the steer response is nonlinear; `response_delay_s` only means 'at most one tick'.
 - Task 2 (deferred minors): the steer test is confounded by a 30-40% speed loss; tests are missing for the `hold_i` hand-off, `ScriptedActor` `ki` and the invalid-start None case; the scripted actor decel lags the nominal b under PI (a world-fidelity gap).

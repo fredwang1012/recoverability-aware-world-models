@@ -168,6 +168,16 @@ def _roles(rows):
     return out
 
 
+def hl_note():
+    """Section 7 paragraph on the ego_hl change: the re-run note and the v = 18 witness are read from core.md (written by scripts/carla_core.py)."""
+    core = rd(CARLA, "core.md")
+    note = re.search(r"^\*\*RC03/RC20 re-run after the ego_hl change\.\*\*(.*)$", core, re.M).group(1).strip()
+    wit = re.search(r"^\| 18 \| 2 \| 30 \| (\S+) \| bypass_left ([\d.]+) \|.*\| (R_REF) \|", core, re.M)
+    return ("**ego_hl change (commit e81aa9d).** " + note + f"  The RC03 v = 18 witness (gap 30, lc_time 2) survives the re-run: brake_hold {wit.group(1)}, bypass_left margin {wit.group(2)}, {wit.group(3)} "
+            "(no re-tuning). Only `bypass_then_stop` and `bypass_then_return` read `ego_hl` through `_obstacle_passed`, and only the RC07 library contains them (re-run earlier); "
+            "the RC03, RC20, corridor and rc03 mining libraries do not call it, so the shift of about 0.1 m (2.3959 - 2.3 = 0.096 m) cannot enter them directly (the re-run differences above are run-to-run variation). The rc03 and corridor mining records (`mining/rc03`, `mining/corridor`) predate the change and were not re-run.")
+
+
 def main():
     rt = json.load(open(os.path.join(CARLA, "runtime.json")))
     pp = json.load(open(os.path.join(CARLA, "physics_profile.json")))
@@ -205,7 +215,7 @@ def main():
         "TRANSITIONS": transitions_table(), "OCC_MIX": ", ".join(f"{k} = {v}" for k, v in sorted(evidence_mix_occ().items())),
         "FLAGS": flags_table(), "RC13_SUMMARY": rc13_summary(), "PAIRS": pairs_table(),
         "SIGMA028": rd(CARLA, "mining", "sigma028.md").split("\n", 2)[2].replace("### ", "#### "), "IG_CARLA": ig_c.replace("## D5", "### D5", 1), "IG_MOCK": ig_m.replace("## D5", "### D5", 1),
-        "DS": json.dumps(ds, indent=1), "D5_READING": rd(ROOT, "docs", "carla_results_d5_reading.md").strip(), "MAX_SPREAD": f"{MAX_SPREAD}",
+        "HL_NOTE": hl_note(), "DS": json.dumps(ds, indent=1), "D5_READING": rd(ROOT, "docs", "carla_results_d5_reading.md").strip(), "MAX_SPREAD": f"{MAX_SPREAD}",
     }
     for k, v in sub.items():
         tpl = tpl.replace("{{" + k + "}}", v)

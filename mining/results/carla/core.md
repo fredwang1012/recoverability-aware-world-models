@@ -6,6 +6,8 @@ Physics profile `pp_381b4c6e55`, decel target 6.19, eps = 0.0, reserve c = 1.0 m
 
 **Server sessions.** RC12 and RC19 records were produced in the earlier server session (before the restart); every limited RC03/RC07/RC20 record and the a_lat check were produced in the restarted session.  Selftest values shifted slightly after the restart (keep-test v0 11.97 -> 11.87 m/s); RC12 and RC19 were not re-run and are mixed in by key (same physics_profile_id).
 
+**RC03/RC20 re-run after the ego_hl change.**  `_obstacle_passed` (commit e81aa9d) now uses the delivered `ego_hl` instead of the literal 2.3 m; the CARLA ego (vehicle.tesla.model3) delivers 2.3959 m (bounding-box extent, so the pass test shifts by 0.096 m).  RC03 (all scans, closed-lane records) and RC20 were re-run under the tag `al8hl`; the 313 earlier records matching a re-run key are kept as `*_al8_prehl_superseded.jsonl` and are not used.  Compared key by key: 0 evidence-class changes; 60 policy margins differ at all, 15 of them for brake_hold, which never reads ego_hl, so the differences are CARLA run-to-run variation, not an ego_hl effect; largest change of a finite margin 0.196.  The RC07/RC12/RC19 sweeps were not re-run here (RC07 was re-run on the same code earlier).
+
 ## RC03: braking fails, bypass passes (brief speeds 8, 11, 14, plus 18 and 22 added after no window was found at 8-14)
 
 Search: for each speed, gap scan for lc_time in 1, 1.2, 1.4, 1.6, 2.  Rule: use the largest lc_time with a window (brake_hold < eps and some bypass >= eps under the limit); chosen gap = median of that window.  Library per run: brake_hold, lane_follow, bypass_left(lc), brake_steer_left(lc, 0.4 s brake).
@@ -58,7 +60,7 @@ Scan v = 8, lc_time = 1.6:
 | 8 | R_REF | brake_hold=0.120, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
 | 8.5 | R_REF | brake_hold=0.220, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
 | 9 | R_REF | brake_hold=0.320, lane_follow=-inf, bypass_left=-0.163, brake_steer_left=-inf |
-| 9.5 | R_REF | brake_hold=0.420, lane_follow=-inf, bypass_left=-0.110, brake_steer_left=-inf |
+| 9.5 | R_REF | brake_hold=0.420, lane_follow=-inf, bypass_left=-0.111, brake_steer_left=-inf |
 | 10 | R_REF | brake_hold=0.520, lane_follow=-inf, bypass_left=-0.054, brake_steer_left=-inf |
 | 10.5 | R_REF | brake_hold=0.620, lane_follow=-inf, bypass_left=0.001, brake_steer_left=-0.165 |
 | 11 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=0.019, brake_steer_left=-0.102 |
@@ -72,7 +74,7 @@ Scan v = 8, lc_time = 1.4:
 | 8 | R_REF | brake_hold=0.120, lane_follow=-inf, bypass_left=-0.197, brake_steer_left=-inf |
 | 8.5 | R_REF | brake_hold=0.220, lane_follow=-inf, bypass_left=-0.136, brake_steer_left=-inf |
 | 9 | R_REF | brake_hold=0.320, lane_follow=-inf, bypass_left=-0.077, brake_steer_left=-inf |
-| 9.5 | R_REF | brake_hold=0.420, lane_follow=-inf, bypass_left=-0.017, brake_steer_left=-inf |
+| 9.5 | R_REF | brake_hold=0.420, lane_follow=-inf, bypass_left=-0.016, brake_steer_left=-inf |
 | 10 | R_REF | brake_hold=0.520, lane_follow=-inf, bypass_left=0.031, brake_steer_left=-0.151 |
 | 10.5 | R_REF | brake_hold=0.620, lane_follow=-inf, bypass_left=0.031, brake_steer_left=-0.083 |
 | 11 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=0.031, brake_steer_left=-0.014 |
@@ -88,7 +90,7 @@ Scan v = 8, lc_time = 1.2:
 | 9 | R_REF | brake_hold=0.320, lane_follow=-inf, bypass_left=0.022, brake_steer_left=-0.209 |
 | 9.5 | R_REF | brake_hold=0.420, lane_follow=-inf, bypass_left=0.041, brake_steer_left=-0.136 |
 | 10 | R_REF | brake_hold=0.520, lane_follow=-inf, bypass_left=0.041, brake_steer_left=-0.064 |
-| 10.5 | R_REF | brake_hold=0.619, lane_follow=-inf, bypass_left=0.041, brake_steer_left=0.010 |
+| 10.5 | R_REF | brake_hold=0.620, lane_follow=-inf, bypass_left=0.041, brake_steer_left=-0.187 |
 | 11 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=0.041, brake_steer_left=0.045 |
 
 Scan v = 8, lc_time = 1:
@@ -96,7 +98,7 @@ Scan v = 8, lc_time = 1:
 | gap | evidence | margins |
 |---|---|---|
 | 7 | U_LIBRARY | brake_hold=-0.080, lane_follow=-inf, bypass_left=-0.145, brake_steer_left=-inf |
-| 7.5 | R_REF | brake_hold=0.020, lane_follow=-inf, bypass_left=-0.133, brake_steer_left=-inf |
+| 7.5 | R_REF | brake_hold=0.020, lane_follow=-inf, bypass_left=-0.134, brake_steer_left=-inf |
 | 8 | R_REF | brake_hold=0.120, lane_follow=-inf, bypass_left=-0.133, brake_steer_left=-inf |
 | 8.5 | R_REF | brake_hold=0.220, lane_follow=-inf, bypass_left=-0.133, brake_steer_left=-inf |
 | 9 | R_REF | brake_hold=0.320, lane_follow=-inf, bypass_left=-0.133, brake_steer_left=-0.122 |
@@ -112,14 +114,14 @@ Scan v = 11, lc_time = 2:
 | 10 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
 | 11 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
 | 12 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
-| 13 | U_LIBRARY | brake_hold=-0.133, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
+| 13 | U_LIBRARY | brake_hold=-0.134, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
 | 14 | R_REF | brake_hold=0.067, lane_follow=-inf, bypass_left=-inf, brake_steer_left=-inf |
 | 15 | R_REF | brake_hold=0.267, lane_follow=-inf, bypass_left=-0.148, brake_steer_left=-inf |
 | 16 | R_REF | brake_hold=0.467, lane_follow=-inf, bypass_left=-0.079, brake_steer_left=-inf |
-| 17 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.019, brake_steer_left=-0.161 |
+| 17 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.019, brake_steer_left=-0.154 |
 | 18 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=0.036, brake_steer_left=-0.072 |
 | 19 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=0.083, brake_steer_left=-0.001 |
-| 20 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=0.097, brake_steer_left=0.057 |
+| 20 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=0.106, brake_steer_left=0.057 |
 
 Scan v = 11, lc_time = 1.6:
 
@@ -131,7 +133,7 @@ Scan v = 11, lc_time = 1.6:
 | 13 | U_LIBRARY | brake_hold=-0.133, lane_follow=-inf, bypass_left=-0.134, brake_steer_left=-inf |
 | 14 | R_REF | brake_hold=0.067, lane_follow=-inf, bypass_left=-0.049, brake_steer_left=-inf |
 | 15 | R_REF | brake_hold=0.267, lane_follow=-inf, bypass_left=0.017, brake_steer_left=-0.167 |
-| 16 | R_REF | brake_hold=0.467, lane_follow=-inf, bypass_left=0.045, brake_steer_left=-0.074 |
+| 16 | R_REF | brake_hold=0.467, lane_follow=-inf, bypass_left=0.056, brake_steer_left=-0.074 |
 | 17 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.056, brake_steer_left=0.013 |
 | 18 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=0.056, brake_steer_left=0.034 |
 | 19 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=0.056, brake_steer_left=0.034 |
@@ -148,9 +150,9 @@ Scan v = 11, lc_time = 1.4:
 | 14 | R_REF | brake_hold=0.067, lane_follow=-inf, bypass_left=-0.017, brake_steer_left=-0.181 |
 | 15 | R_REF | brake_hold=0.267, lane_follow=-inf, bypass_left=-0.017, brake_steer_left=-0.074 |
 | 16 | R_REF | brake_hold=0.467, lane_follow=-inf, bypass_left=-0.017, brake_steer_left=0.020 |
-| 17 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.017, brake_steer_left=0.030 |
+| 17 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.018, brake_steer_left=0.030 |
 | 18 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.017, brake_steer_left=0.030 |
-| 19 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.017, brake_steer_left=0.030 |
+| 19 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.005, brake_steer_left=0.030 |
 | 20 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.017, brake_steer_left=0.030 |
 
 Scan v = 11, lc_time = 1.2:
@@ -161,9 +163,9 @@ Scan v = 11, lc_time = 1.2:
 | 11 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-inf |
 | 12 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-inf |
 | 13 | U_LIBRARY | brake_hold=-0.133, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-0.192 |
-| 14 | R_REF | brake_hold=0.067, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-0.116 |
+| 14 | R_REF | brake_hold=0.067, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-0.117 |
 | 15 | R_REF | brake_hold=0.267, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-0.116 |
-| 16 | R_REF | brake_hold=0.467, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-0.116 |
+| 16 | R_REF | brake_hold=0.467, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-0.128 |
 | 17 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-0.116 |
 | 18 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-0.116 |
 | 19 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.244, brake_steer_left=-0.116 |
@@ -178,7 +180,7 @@ Scan v = 11, lc_time = 1:
 | 12 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.532, brake_steer_left=-inf |
 | 13 | U_LIBRARY | brake_hold=-0.133, lane_follow=-inf, bypass_left=-0.532, brake_steer_left=-0.350 |
 | 14 | R_REF | brake_hold=0.067, lane_follow=-inf, bypass_left=-0.532, brake_steer_left=-0.350 |
-| 15 | R_REF | brake_hold=0.267, lane_follow=-inf, bypass_left=-0.532, brake_steer_left=-0.350 |
+| 15 | R_REF | brake_hold=0.266, lane_follow=-inf, bypass_left=-0.532, brake_steer_left=-0.350 |
 | 16 | R_REF | brake_hold=0.467, lane_follow=-inf, bypass_left=-0.532, brake_steer_left=-0.350 |
 | 17 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.532, brake_steer_left=-0.350 |
 | 18 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.532, brake_steer_left=-0.350 |
@@ -197,9 +199,9 @@ Scan v = 14, lc_time = 2:
 | 19 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.174, brake_steer_left=-inf |
 | 20 | U_LIBRARY | brake_hold=-0.101, lane_follow=-inf, bypass_left=-0.121, brake_steer_left=-inf |
 | 21 | R_REF | brake_hold=0.099, lane_follow=-inf, bypass_left=-0.071, brake_steer_left=-inf |
-| 22 | R_REF | brake_hold=0.299, lane_follow=-inf, bypass_left=-0.023, brake_steer_left=-0.172 |
+| 22 | R_REF | brake_hold=0.299, lane_follow=-inf, bypass_left=-0.022, brake_steer_left=-0.172 |
 | 23 | R_REF | brake_hold=0.499, lane_follow=-inf, bypass_left=0.022, brake_steer_left=-0.110 |
-| 24 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.063, brake_steer_left=-0.053 |
+| 24 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.064, brake_steer_left=-0.053 |
 | 25 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.099, brake_steer_left=0.000 |
 | 26 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.130, brake_steer_left=0.049 |
 
@@ -264,7 +266,7 @@ Scan v = 14, lc_time = 1:
 | 14 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-inf |
 | 15 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-inf |
 | 16 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
-| 17 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
+| 17 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.689 |
 | 18 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
 | 19 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
 | 20 | U_LIBRARY | brake_hold=-0.101, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
@@ -273,7 +275,7 @@ Scan v = 14, lc_time = 1:
 | 23 | R_REF | brake_hold=0.499, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
 | 24 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
 | 25 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
-| 26 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.691 |
+| 26 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.840, brake_steer_left=-0.692 |
 
 Scan v = 18, lc_time = 2:
 
@@ -284,12 +286,12 @@ Scan v = 18, lc_time = 2:
 | 28 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.068, brake_steer_left=-inf |
 | 30 | R_REF | brake_hold=-inf, lane_follow=-inf, bypass_left=0.008, brake_steer_left=-0.163 |
 | 32 | R_REF | brake_hold=0.134, lane_follow=-inf, bypass_left=0.074, brake_steer_left=-0.073 |
-| 34 | R_REF | brake_hold=0.534, lane_follow=-inf, bypass_left=0.113, brake_steer_left=0.010 |
-| 36 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.119, brake_steer_left=0.082 |
-| 38 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.119, brake_steer_left=0.138 |
+| 34 | R_REF | brake_hold=0.534, lane_follow=-inf, bypass_left=0.119, brake_steer_left=0.010 |
+| 36 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.119, brake_steer_left=0.081 |
+| 38 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.119, brake_steer_left=0.136 |
 | 40 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.119, brake_steer_left=0.146 |
 | 42 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.119, brake_steer_left=0.146 |
-| 44 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.119, brake_steer_left=0.146 |
+| 44 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.118, brake_steer_left=0.146 |
 | 46 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.119, brake_steer_left=0.146 |
 | 48 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.119, brake_steer_left=0.146 |
 | 50 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.119, brake_steer_left=0.146 |
@@ -306,7 +308,7 @@ Scan v = 18, lc_time = 1.6:
 | 34 | R_REF | brake_hold=0.534, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-0.167 |
 | 36 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-0.167 |
 | 38 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-0.167 |
-| 40 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.250, brake_steer_left=-0.167 |
+| 40 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-0.167 |
 | 42 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-0.167 |
 | 44 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-0.167 |
 | 46 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.248, brake_steer_left=-0.167 |
@@ -326,9 +328,9 @@ Scan v = 18, lc_time = 1.4:
 | 36 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
 | 38 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
 | 40 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
-| 42 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.433 |
+| 42 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
 | 44 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
-| 46 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
+| 46 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.522, brake_steer_left=-0.410 |
 | 48 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
 | 50 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.550, brake_steer_left=-0.410 |
 
@@ -343,7 +345,7 @@ Scan v = 18, lc_time = 1.2:
 | 32 | R_REF | brake_hold=0.134, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
 | 34 | R_REF | brake_hold=0.534, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
 | 36 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
-| 38 | R_REF | brake_hold=0.668, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
+| 38 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
 | 40 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
 | 42 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
 | 44 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.929, brake_steer_left=-0.710 |
@@ -368,7 +370,7 @@ Scan v = 18, lc_time = 1:
 | 44 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.372, brake_steer_left=-1.082 |
 | 46 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.372, brake_steer_left=-1.082 |
 | 48 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.372, brake_steer_left=-1.082 |
-| 50 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.370, brake_steer_left=-1.082 |
+| 50 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-1.372, brake_steer_left=-1.082 |
 
 Scan v = 22, lc_time = 2:
 
@@ -381,7 +383,7 @@ Scan v = 22, lc_time = 2:
 | 38 | R_REF | brake_hold=-inf, lane_follow=-inf, bypass_left=0.024, brake_steer_left=-0.173 |
 | 40 | R_REF | brake_hold=-inf, lane_follow=-inf, bypass_left=0.068, brake_steer_left=-0.100 |
 | 42 | R_REF | brake_hold=-0.174, lane_follow=-inf, bypass_left=0.068, brake_steer_left=-0.030 |
-| 44 | R_REF | brake_hold=0.226, lane_follow=-inf, bypass_left=0.068, brake_steer_left=0.008 |
+| 44 | R_REF | brake_hold=0.226, lane_follow=-inf, bypass_left=0.068, brake_steer_left=0.034 |
 | 46 | R_REF | brake_hold=0.626, lane_follow=-inf, bypass_left=0.068, brake_steer_left=0.086 |
 | 48 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.068, brake_steer_left=0.086 |
 | 50 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=0.068, brake_steer_left=0.086 |
@@ -405,7 +407,7 @@ Scan v = 22, lc_time = 1.6:
 | 48 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.394, brake_steer_left=-0.322 |
 | 50 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.394, brake_steer_left=-0.322 |
 | 52 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.394, brake_steer_left=-0.322 |
-| 54 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.394, brake_steer_left=-0.322 |
+| 54 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.397, brake_steer_left=-0.322 |
 | 56 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.394, brake_steer_left=-0.322 |
 
 Scan v = 22, lc_time = 1.4:
@@ -414,18 +416,18 @@ Scan v = 22, lc_time = 1.4:
 |---|---|---|
 | 30 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-inf |
 | 32 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
-| 34 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
+| 34 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.795, brake_steer_left=-0.650 |
 | 36 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
 | 38 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
 | 40 | U_LIBRARY | brake_hold=-inf, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
 | 42 | U_LIBRARY | brake_hold=-0.174, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
-| 44 | R_REF | brake_hold=0.185, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
+| 44 | R_REF | brake_hold=0.226, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
 | 46 | R_REF | brake_hold=0.626, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
 | 48 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
-| 50 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.645 |
+| 50 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
 | 52 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
 | 54 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
-| 56 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.788, brake_steer_left=-0.650 |
+| 56 | R_REF | brake_hold=0.667, lane_follow=-inf, bypass_left=-0.787, brake_steer_left=-0.650 |
 
 Scan v = 22, lc_time = 1.2:
 
@@ -467,7 +469,7 @@ Scan v = 22, lc_time = 1:
 
 ## RC07: premature hand-back vs continuation
 
-*RC07 was re-run on the fixed plant (moving actors pinned to their declared speed during warm-up; Task 6 fix round 1). The first run, whose rear actor started at 15.90 m/s for a nominal 18, is superseded (sweeps `rc07_scan_al8` / `rc07_sel_al8`, kept in the jsonl directory; previous report text in `core_before_rc07_rerun.md`).*
+*RC07 was re-run on the fixed plant (moving actors pinned to their declared speed during warm-up; Task 6 fix round 1). The first run, whose rear actor started at 15.90 m/s for a nominal 18, is superseded (sweeps `rc07_scan_al8` / `rc07_sel_al8`, kept in the jsonl directory; previous report text in git history at commit 21719eb).*
 
 Library `rc07_v2_alat8_fixplant` = bypass_then_stop, bypass_then_return, brake_hold, bypass_left (primary-only avoidance, no hand-back), lc_time 2.0 (peak a_lat ~5), a_lat_max 8.  v = 12, rear actor in the left lane.  Full contrast in one scene = bypass_left >= eps AND bypass_then_stop < eps AND bypass_then_return >= eps (`rc07_contrast`).
 
@@ -507,7 +509,7 @@ Selection rule: among full-contrast scenes take the highest rear_v, then the med
 - bypass_then_return: termination horizon, contacted none, peak abs a_lat 5.63 m/s^2
 - brake_hold: termination horizon, contacted none, peak abs a_lat 0.00 m/s^2
 
-Measured rear speed (per-tick spy over the policy episodes, 905 ticks): nominal 18, at start 17.14, max 18.81, mean 17.90 m/s.  brake_hold also passes in place at gap 34, so the scene stays R_REF (one refuted policy never makes a scene unrecoverable).
+Measured rear speed (per-tick spy over the policy episodes, 245 ticks): nominal 18, at start 17.14, max 18.81, mean 17.93 m/s.  brake_hold also passes in place at gap 34, so the scene stays R_REF (one refuted policy never makes a scene unrecoverable).
 
 ## RC12: baseline-keep prefix before braking (corridor, gap 40, v 12, tau 0.25, brake_hold@prefix)
 

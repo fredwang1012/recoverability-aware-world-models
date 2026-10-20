@@ -31,6 +31,7 @@ A_LAT_MAX = 8.0                        # m/s^2, controller ruling: declared in t
 LC_CANDIDATES = (1.0, 1.2, 1.4, 1.6, 2.0)   # lane-change durations searched; the largest one with a window under the limit is used
 RC19_TOL = 0.05                        # pre-declared |dV| tolerance (margins are normalised, unit-free), fixed before any run
 RC07_LIBRARY_ID = f"rc07_v2_alat{A_LAT_MAX:g}_fixplant"      # re-run on the plant with moving actors pinned to their declared speed in warm-up (Task 6 fix round 1)
+TAG_HL = f"al{A_LAT_MAX:g}hl"          # RC03/RC20 sweeps re-run after _obstacle_passed began using the delivered ego_hl (2.3959 m on CARLA, not the literal 2.3)
 TAG = f"al{A_LAT_MAX:g}"               # part of every limited sweep name / key, so a limit or library change cannot reuse stale records
 
 
@@ -167,7 +168,7 @@ def rc03_rec(ctx, th, lc, with_bypass=True, **kw):
 
 
 def rc03_scan(ctx, v, lc, gaps):
-    name = f"rc03_v{v:g}_lc{lc:g}_{TAG}"
+    name = f"rc03_v{v:g}_lc{lc:g}_{TAG_HL}"
     return {g: ctx.point(name, f"{g:.3f}", lambda g=g: rc03_rec(ctx, rc03_th(v, g), lc), library_id=lib_id("full", lc), lc_time=lc,
                          a_lat_max=A_LAT_MAX) for g in gaps}
 
@@ -200,7 +201,7 @@ def run_rc03(ctx):
         if lc is not None:
             g = per_lc[lc]["gap"]
             th = rc03_th(v, g, True)
-            closed = ctx.point(f"rc03_closed_v{v:g}_{TAG}", f"{lc:g}_{g:.3f}", lambda: rc03_rec(ctx, th, lc), library_id=lib_id("full", lc),
+            closed = ctx.point(f"rc03_closed_v{v:g}_{TAG_HL}", f"{lc:g}_{g:.3f}", lambda: rc03_rec(ctx, th, lc), library_id=lib_id("full", lc),
                                lc_time=lc, a_lat_max=A_LAT_MAX)
         res[v] = {"per_lc": per_lc, "lc": lc, "gap": per_lc[lc]["gap"] if lc else None, "window": per_lc[lc]["window"] if lc else [],
                   "scan": per_lc[lc]["scan"] if lc else per_lc[max(per_lc)]["scan"], "closed": closed}
@@ -325,11 +326,11 @@ def run_rc20(ctx, rc03):
         spec = with_limit(TL.rc03_spec(th, CFG))
         rest = lambda: TL.rc03_library(False, lc)
         x = dict(lc_time=lc, a_lat_max=A_LAT_MAX)
-        a = ctx.point(f"rc20_{TAG}", f"restricted_{v:g}_{lc:g}_{g:g}", lambda: ctx.tl("RC03", th, library=rest(), spec=spec),
+        a = ctx.point(f"rc20_{TAG_HL}", f"restricted_{v:g}_{lc:g}_{g:g}", lambda: ctx.tl("RC03", th, library=rest(), spec=spec),
                       library_id=lib_id("restricted", lc), **x)
-        b = ctx.point(f"rc20_{TAG}", f"budget_{v:g}_{lc:g}_{g:g}", lambda: ctx.tl("RC03", th, library=rest(), spec=spec, run_mask={(0, 0)}),
+        b = ctx.point(f"rc20_{TAG_HL}", f"budget_{v:g}_{lc:g}_{g:g}", lambda: ctx.tl("RC03", th, library=rest(), spec=spec, run_mask={(0, 0)}),
                       library_id=lib_id("restricted", lc) + "+budget1", **x)
-        c = ctx.point(f"rc20_{TAG}", f"expanded_{v:g}_{lc:g}_{g:g}", lambda: ctx.tl("RC03", th, library=TL.rc03_library(True, lc), spec=spec),
+        c = ctx.point(f"rc20_{TAG_HL}", f"expanded_{v:g}_{lc:g}_{g:g}", lambda: ctx.tl("RC03", th, library=TL.rc03_library(True, lc), spec=spec),
                       library_id=lib_id("full", lc), **x)
         out[v] = {"theta": th, "lc": lc, "restricted": a, "budget": b, "expanded": c,
                   "same_spec": a["geometry"]["spec"] == c["geometry"]["spec"] == b["geometry"]["spec"]}
@@ -378,6 +379,40 @@ def fp(x):
     return "n/a" if x is None else f"{x:.2f}"
 
 
+def hl_rerun_note():
+    """Computed from the records: RC03/RC20 were re-run under tag TAG_HL after _obstacle_passed began using the delivered ego_hl (2.3959 m on CARLA,
+    from the ego bounding box, instead of the literal 2.3).  Old records are kept as *_prehl_superseded.jsonl.  Returns md text or ''."""
+    n = ev = 0
+    dmax, nchg, nbh = 0.0, 0, 0
+    for fn_ in sorted(os.listdir(OUT)):
+        if not fn_.endswith(f"_{TAG}_prehl_superseded.jsonl"):
+            continue
+        new = f"{OUT}/{fn_[:-len(f'_{TAG}_prehl_superseded.jsonl')]}_{TAG_HL}.jsonl"
+        if not os.path.exists(new):
+            continue
+        old_r = {r["_key"]: r for r in map(json.loads, open(f"{OUT}/{fn_}"))}
+        for r in map(json.loads, open(new)):
+            o = old_r.get(r["_key"])
+            if o is None:
+                continue
+            n += 1
+            ev += o["evidence_class"] != r["evidence_class"]
+            a, b = margins(o), margins(r)
+            for k in a:
+                if a[k] != b.get(k):
+                    nchg += 1
+                    nbh += k == "brake_hold"
+                if a[k] is not None and b.get(k) is not None and math.isfinite(a[k]) and math.isfinite(b[k]):
+                    dmax = max(dmax, abs(a[k] - b[k]))
+    if not n:
+        return ""
+    return (f"**RC03/RC20 re-run after the ego_hl change.**  `_obstacle_passed` (commit e81aa9d) now uses the delivered `ego_hl` instead of the literal 2.3 m; "
+            f"the CARLA ego (vehicle.tesla.model3) delivers 2.3959 m (bounding-box extent, so the pass test shifts by 0.096 m).  RC03 (all scans, closed-lane records) and RC20 were re-run "
+            f"under the tag `{TAG_HL}`; the {n} earlier records matching a re-run key are kept as `*_{TAG}_prehl_superseded.jsonl` and are not used.  Compared key by key: "
+            f"{ev} evidence-class changes; {nchg} policy margins differ at all, {nbh} of them for brake_hold, which never reads ego_hl, so the differences are CARLA run-to-run variation, not an ego_hl effect; "
+            f"largest change of a finite margin {dmax:.3f}.  The RC07/RC12/RC19 sweeps were not re-run here (RC07 was re-run on the same code earlier).\n")
+
+
 def report(ctx, r03, r07, r12, r19, r20):
     L = []
     w = L.append
@@ -393,6 +428,7 @@ def report(ctx, r03, r07, r12, r19, r20):
     w("**Server sessions.** RC12 and RC19 records were produced in the earlier server session (before the restart); every limited RC03/RC07/RC20 "
       "record and the a_lat check were produced in the restarted session.  Selftest values shifted slightly after the restart (keep-test v0 11.97 -> 11.87 m/s); "
       "RC12 and RC19 were not re-run and are mixed in by key (same physics_profile_id).\n")
+    w(hl_rerun_note())
     w("## RC03: braking fails, bypass passes (brief speeds 8, 11, 14, plus 18 and 22 added after no window was found at 8-14)\n")
     w("Search: for each speed, gap scan for lc_time in " + ", ".join(f"{x:g}" for x in LC_CANDIDATES) +
       ".  Rule: use the largest lc_time with a window (brake_hold < eps and some bypass >= eps under the limit); chosen gap = median of that window.  "
@@ -424,7 +460,7 @@ def report(ctx, r03, r07, r12, r19, r20):
             for g in sorted(sc):
                 w(f"| {g:g} | {sc[g]['evidence_class']} | {mrow(sc[g])} |")
     w("\n## RC07: premature hand-back vs continuation\n")
-    w("*RC07 was re-run on the fixed plant (moving actors pinned to their declared speed during warm-up; Task 6 fix round 1). The first run, whose rear actor started at 15.90 m/s for a nominal 18, is superseded (sweeps `rc07_scan_al8` / `rc07_sel_al8`, kept in the jsonl directory; previous report text in `core_before_rc07_rerun.md`).*\n")
+    w("*RC07 was re-run on the fixed plant (moving actors pinned to their declared speed during warm-up; Task 6 fix round 1). The first run, whose rear actor started at 15.90 m/s for a nominal 18, is superseded (sweeps `rc07_scan_al8` / `rc07_sel_al8`, kept in the jsonl directory; previous report text in git history at commit 21719eb).*\n")
     w(f"Library `{RC07_LIBRARY_ID}` = bypass_then_stop, bypass_then_return, brake_hold, bypass_left (primary-only avoidance, no hand-back), lc_time 2.0 (peak a_lat ~5), "
       f"a_lat_max {A_LAT_MAX:g}.  v = 12, rear actor in the left lane.  Full contrast in one scene = bypass_left >= eps AND bypass_then_stop < eps AND bypass_then_return >= eps (`rc07_contrast`).\n")
     w("| gap | rear_gap | rear_v | evidence | full contrast | margins |\n|---|---|---|---|---|---|")
