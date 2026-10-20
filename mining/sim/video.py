@@ -119,7 +119,8 @@ def composite(rgb, inst, ghost_ids=(), seed=0, tint=None):
     for i, col in (tint or {}).items():
         m = veh & (aid == i)
         if m.any():
-            out[m] = np.clip(A[m].mean(-1, keepdims=True) / 110.0, 0.25, 1.6) * np.array(col, np.float32)
+            # role colour with the render's shading on top; the floor keeps a dark body (e.g. a black car) reading as its role colour
+            out[m] = np.clip(0.6 + A[m].mean(-1, keepdims=True) / 255.0 * 0.6, 0.6, 1.15) * np.array(col, np.float32)
     boxes = {}
     for i in ghost_ids:
         m = veh & (aid == i)
