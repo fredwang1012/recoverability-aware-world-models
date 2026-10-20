@@ -176,3 +176,16 @@ def test_harness_spec_a_comb_vmin_override_changes_the_margin():
         out[vmin] = res.margin["parts"]["dyn"]
     assert out[0.0] < 0.0 <= out[50.0]       # vmin=0 counts the 9 m/s^2 braking (> 8); vmin=50 excludes every tick
     assert out[50.0] > out[0.0]
+
+
+def test_rc04_path_length_lane_change_gives_the_staged_witness():
+    """Time-defined lane changes cannot show RC04 (see cases/compositional.rc04_path_library); over a fixed path length the immediate
+    change breaks a_lat_max at 28 m/s while braking first and then changing passes, and the gap is too short for brake_hold alone."""
+    from families import mock_ctx
+    ctx = mock_ctx()
+    th = {"gap_m": 66.0, "v_mps": 28.0, "tau_s": 0.25, "b_mps2": 6.19}
+    r = CP.run("RC04", lambda: ctx["factory"](th), th, M.DEFAULT_V2, "mock", "mock", library=CP.rc04_path_library(40.0))
+    G = {p: row[0] for p, row in zip(r.policies, r.R_raw)}
+    assert G["brake_hold"] < 0 and G["immediate_lane_change"] < 0
+    assert max(g for p, g in G.items() if p.startswith("staged")) >= 0
+    assert r.evidence_class == "R_REF"

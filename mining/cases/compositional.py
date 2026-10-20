@@ -61,6 +61,19 @@ def rc04_library(lc_time=1.6, ps=(0.4, 0.8)):
     return lib
 
 
+def rc04_path_library(lc_dist=40.0, ps=(0.4, 0.8, 1.2)):
+    """RC04 with lane changes defined by PATH LENGTH lc_dist (m) instead of time.  For an ideally tracked time-defined change
+    (rc04_library) the lateral acceleration is the same at every speed, so braking first only shortens the change's distance when
+    v < b (T + p/2), while a swerve only beats braking when v > 2 b T, and those windows do not overlap.  The contrast then exists only
+    through the tracker's speed dependence (enough on the kinematic mock plant at v 18 / lc 1.6; none was found in 92 CARLA scenes).
+    Over a fixed path length the duration is lc_dist / v and the lateral acceleration grows with v^2, so an immediate change breaks
+    a_lat_max where a change after braking does not.  The immediate and the staged changes use the SAME lc_dist."""
+    lib = [lambda: P.BrakeHold(), lambda: P.LaneFollow(),
+           _named(lambda: P.Bypass(side=-1, lc_dist=lc_dist), "immediate_lane_change")]
+    lib += [_named((lambda p=p: P.StagedBrakeChange(p=p, lc_dist=lc_dist)), f"staged_brake_{p:g}_change") for p in ps]
+    return lib
+
+
 # ----------------------------------------------------------------------------- RC05
 def rc05_spec(theta, cfg):
     acts = {"blk": TL._blk(theta["gap_m"]),

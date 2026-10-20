@@ -216,7 +216,28 @@ class Rc03Carla(Rc03):
                       library=TL.rc03_library(True, CARLA_LC_TIME), spec=spec, **ctx.get("run_kw", {}))
 
 
-FAMILIES_CARLA = {f.name: f for f in (CorridorCarla(), Rc03Carla())}
+class Rc07Carla(Rc07):
+    """RC07 on CARLA: the same scene, library and limit as the Task C2 case run (scripts/carla_core.rc07_rec): library
+    rc07_v2 = bypass_then_stop, bypass_then_return, brake_hold, bypass_left (lc_time 2.0), spec a_lat_max = 8, tau 0.25, b fixed at the
+    calibrated target.  theta = (gap, rear_gap, rear_v, v); v is kept in 10..16 because the case's contrast was found at v = 12 and the
+    2.0 s lane change stays under the limit there.  rear_v spans 14..26 (the case scan found the full contrast only at rear_v 18)."""
+    lo = np.array([18.0, 30.0, 14.0, 10.0])
+    hi = np.array([50.0, 120.0, 26.0, 16.0])
+
+    def meta(self):
+        return {"library_id": f"rc07_v2_alat{CARLA_A_LAT_MAX:g}_fixplant", "lc_time": CARLA_LC_TIME, "a_lat_max": CARLA_A_LAT_MAX,
+                "b_fixed_mps2": CARLA_DECEL}
+
+    def run(self, th, ctx):
+        from sim import policies as P
+        th = dict(th, tau_s=0.25, b_mps2=CARLA_DECEL)
+        spec = dict(TL.rc07_spec(th, ctx["cfg"]), a_lat_max=CARLA_A_LAT_MAX)
+        library = TL.rc07_library() + [lambda: P.Bypass(side=-1, lc_time=CARLA_LC_TIME)]
+        return TL.run("RC07", lambda: ctx["factory"](th), th, ctx["cfg"], ctx["backend"], ctx["scope"], family="rc07",
+                      library=library, spec=spec, **ctx.get("run_kw", {}))
+
+
+FAMILIES_CARLA = {f.name: f for f in (CorridorCarla(), Rc03Carla(), Rc07Carla())}
 
 
 def mock_factory(th):

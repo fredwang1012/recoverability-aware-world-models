@@ -2,7 +2,7 @@
 
 As of 2026-10-20 · Frederick Wang (Approach 1)
 
-> Live, editable version: [Claude Doc](https://claude.ai/artifact/FqWMCYVENDUFkjkbAVpykJ) (private until shared from its Share menu).
+> Live version: [Claude Doc](https://claude.ai/artifact/FqWMCYVENDUFkjkbAVpykJ) (anyone with the link can open it).
 > This file is a snapshot of it. The generated numbers report is [`carla_results.md`](carla_results.md).
 
 All 20 recoverability cases from the PDF were built and labelled on CARLA 0.9.16. Every label comes from executed evidence, never set by hand. 19 cases show their intended mechanism; RC04 has no positive example on CARLA. Boundary mining ran on two case families and information-gap mining on one.

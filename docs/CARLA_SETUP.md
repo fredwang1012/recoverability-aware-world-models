@@ -66,3 +66,22 @@ Mining and the dataset: see [`../scripts/README.md`](../scripts/README.md).
 | `spawn failed ... collision at spawn position` | Actors left behind by a killed client | Tick once, destroy every `vehicle.*` and `sensor.*` actor, tick again (the actor list only refreshes after a tick) |
 | Server freezes as soon as a camera is attached | In synchronous mode a camera image must be taken before any other request after a tick | Use `sim.video.RecordingPlant`, which drains the image right after every tick |
 | GPU above 85 °C | Long runs on a laptop | The scripts pause automatically (`gpu_wait`) until it drops below 78 °C |
+
+## Checked against the CARLA docs and the determinism literature
+
+Summary of [`process/carla_best_practices_research.md`](process/carla_best_practices_research.md) (CARLA 0.9.16 docs, CARLA GitHub issues, and Chance et al.'s study of CARLA determinism):
+
+| Practice | Status here |
+| --- | --- |
+| Synchronous mode, fixed step, substepping within `fixed_delta <= max_substep_delta x max_substeps` | Yes: 0.05 s, 0.01 s x 10 |
+| Set world settings after `generate_opendrive_world` (it resets them by default) | Yes: `sim.bringup.connect` applies them after the call |
+| No walls the ego could hit at the road edge | Yes: `wall_height=0.0` |
+| End a test at first collision: CARLA physics after contact is the least repeatable part | Yes: `run_episode` stops at first contact, and the videos freeze there |
+| Keep labelling runs apart from GPU-heavy recording | Yes: labels never come from video runs |
+| Physics changes take effect on the next tick | Handled: the plant ticks once after `apply_physics_control`, then re-imposes the speed |
+| Report a noise band rather than trusting single margins | Yes: 0.028 within a session and 0.196 across sessions, flagged in `carla_results.md` |
+| Rendering does not change physics | Partly checked: the 36 video re-runs (rendering on, a new session) reproduced the stored margins to 3 decimals |
+| Repeat determinism across servers or hardware | Not tested: one server fits in 6 GB |
+| Smaller time step (0.025 s) as a sensitivity check | Not done |
+
+The camera deadlock (an RPC issued before the image of the last tick is drained) is not documented upstream; it was reproduced here on 0.9.16.

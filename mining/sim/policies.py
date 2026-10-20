@@ -23,6 +23,7 @@ class Policy:
 
     def reset(self):
         self.t0 = None
+        self._lc_frozen = None
 
     def _since(self, t):
         if self.t0 is None:
@@ -49,6 +50,20 @@ class BrakeHold(Policy):
         return EgoCommand(long="brake", brake_frac=self.params.get("brake_frac", 1.0))
 
 
+def _lc_time(policy, history):
+    """Lane-change duration.  Default: the fixed `lc_time` (a lane change defined in TIME, whose lateral acceleration does not depend on
+    speed).  With `lc_dist` (m) the change is defined by PATH LENGTH: its duration is lc_dist / v at the moment the change starts, frozen
+    for the rest of the change (re-issuing a different duration would restart the tracker).  Then lateral acceleration grows with v^2,
+    so braking first can make a change admissible (RC04's mechanism)."""
+    d = policy.params.get("lc_dist")
+    if d is None:
+        return policy.params["lc_time"]
+    if getattr(policy, "_lc_frozen", None) is None:
+        v = history[-1].v if history else 1.0
+        policy._lc_frozen = d / max(v, 1.0)
+    return policy._lc_frozen
+
+
 class Bypass(Policy):
     """Lane change to `side` (-1 = left, +1 = right) after `brake_s` seconds of braking, then stabilise (RC03/RC04)."""
     terminal = "lane_follow"
@@ -64,7 +79,7 @@ class Bypass(Policy):
         lane_w = history[-1].lane_w if history else 3.5
         if p["brake_s"] > 0 and s < p["brake_s"]:
             return EgoCommand(long="brake")
-        return EgoCommand(long="keep", lat_target=p["side"] * lane_w, lc_time=p["lc_time"])
+        return EgoCommand(long="keep", lat_target=p["side"] * lane_w, lc_time=_lc_time(self, history))
 
 
 class StagedBrakeChange(Policy):
@@ -79,7 +94,7 @@ class StagedBrakeChange(Policy):
         lane_w = history[-1].lane_w if history else 3.5
         if s < self.params["p"]:
             return EgoCommand(long="brake")
-        return EgoCommand(long="keep", lat_target=self.params["side"] * lane_w, lc_time=self.params["lc_time"])
+        return EgoCommand(long="keep", lat_target=self.params["side"] * lane_w, lc_time=_lc_time(self, history))
 
 
 class BaselineThenHandover(Policy):

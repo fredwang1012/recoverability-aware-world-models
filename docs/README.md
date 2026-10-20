@@ -22,6 +22,7 @@
 ## process/ (how the work was run)
 
 - [`process/plan_carla_physical_scenarios.md`](process/plan_carla_physical_scenarios.md): the 9-task implementation plan.
+- [`process/carla_best_practices_research.md`](process/carla_best_practices_research.md): our setup checked against the CARLA docs and the determinism literature.
 - `process/reports/`: implementer reports for tasks 6, 8, 9, the final fix wave and the videos.
 
 ## archive/

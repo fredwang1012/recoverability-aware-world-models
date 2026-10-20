@@ -97,3 +97,13 @@ def test_observed_spread_and_pair_key():
     assert abs(MP.observed_spread(rows) - 0.017) < 1e-12 and MP.observed_spread([]) == 0
     p = {"unrecoverable_side": {"theta": {"a": 1}}, "recoverable_side": {"theta": {"a": 2}}}
     assert MC.pair_key(p) == MC.pair_key(dict(p))
+
+
+def test_rc07_carla_family_matches_the_case_run():
+    from families import FAMILIES_CARLA, mock_ctx
+    f = FAMILIES_CARLA["rc07"]
+    th = f.decode([0.5, 0.5, 0.5, 0.5])
+    assert set(th) == {"gap_m", "rear_gap_m", "rear_v_mps", "v_mps"}
+    assert f.meta()["library_id"] == "rc07_v2_alat8_fixplant"
+    r = f.run(th, mock_ctx())
+    assert r.policies == ["bypass_then_stop", "bypass_then_return", "brake_hold", "bypass_left"]
