@@ -176,7 +176,7 @@ def run_episode(plant, spec, policy, world, cfg=M.DEFAULT_V2, seed=0, keep_histo
     a_lat = np.abs(np.array(speeds) * np.gradient(yaw, dt)) if len(yaw) > 2 else np.zeros(len(speeds))
     dyn = [("a_lat", a_lat, spec["a_lat_max"])] if "a_lat_max" in spec else []
     vmin = spec.get("a_comb_vmin", A_COMB_VMIN)
-    acc = accel_series(speeds, ax_hist, a_lat, vmin)
+    acc = accel_series(speeds, ax_hist, a_lat, vmin, dt)
     ax_s, a_comb, a_comb_u = acc["a_long_masked"], acc["a_comb"], acc["a_comb_unmasked"]
     if "a_comb_max" in spec:
         dyn.append(("a_comb", a_comb, spec["a_comb_max"]))
