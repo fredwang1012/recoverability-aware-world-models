@@ -138,7 +138,7 @@ class InfoGap(Family):
         return th["gap_m"] / th["v_mps"], th["t_reveal_s"]
 
     def meta(self):
-        return {"library_id": f"occ_lc2.0_al8lc2", "lc_time": 2.0, "a_lat_max": 8.0, "b_fixed_mps2": CARLA_DECEL}
+        return {"library_id": "occ_lc2.0_al8lc2", "lc_time": 2.0, "a_lat_max": 8.0, "b_fixed_mps2": CARLA_DECEL}
 
     def search_value(self, rec, algo):
         import infogap as IG

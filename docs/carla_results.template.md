@@ -13,7 +13,7 @@ Labels (`R_REF`, `U_LIBRARY`, `U_INFORMATION`, ...) come only from `contract.cla
 - Physics profile `{{PROFILE_ID}}` (Tesla Model 3, knob = max_brake_torque at fixed tire_friction 5.0), margin config `margin.DEFAULT_V2` (reserve c = 1.0 m, eps = 0.0, horizon 8 s); both ids are written into every record. Blueprints: {{BLUEPRINTS}}. World settings: {{SETTINGS}}.
 - One CARLA server on port 2000 at a time (only one instance fits the 6 GB GPU), custom map `straight_2lane`, headless, no sensors.
 - Seeds: mining runs use seeds 0 and 1; D5 uses seeds 0 and 1; scenario-level CARLA runs are deterministic functions of theta apart from the plant noise described in section 7.
-- Server restarts: (a) after the hang during the Task 4 fix round (the controller restarted the single instance; selftest keep-test v0 shifted from 11.97 to 11.87 m/s afterwards, brake check 8.91 to 9.07 m/s^2); the Task 2 bring-up predates it; (b) a crash before the Task 9 D5 run, again restarted as a single instance on port 2000, selftest PASS on the new session (`mining/results/carla/selftest.txt` is that rerun). RC12 and RC19 records are from the session before restart (a).
+- Server restarts: (a) after the hang during the Task 4 fix round (the controller restarted the single instance; selftest keep-test v0 shifted from 11.97 to 11.87 m/s afterwards, as recorded in `core.md` (Server sessions); the current `selftest.txt` brake check reads 9.07 m/s^2); the Task 2 bring-up predates it; (b) a crash before the Task 9 D5 run, again restarted as a single instance on port 2000, selftest PASS on the new session (`mining/results/carla/selftest.txt` is that rerun). RC12 and RC19 records are from the session before restart (a).
 
 ## 2. Acceptance checklist
 
@@ -23,7 +23,7 @@ PASS = criterion met as stated; WARN = met with a caveat listed in section 7; NO
 |---|---|---|---|
 | 1 | physics profile, monotone brake map covers 5-9 m/s^2 | WARN | `calibration.md`, `physics_profile.json`; friction 5.0 non-physical, decel range 4.77..17.51 is a torque-knob abstraction |
 | 2 | bring-up selftest | PASS | `selftest.txt` (8 checks) |
-| 2 | determinism, same server repeats | PASS | `determinism.md` (max dx, dlat, dv all 0.0000) |
+| 2 | determinism, same server repeats | WARN | `determinism.md` is exact on its two cases (max dx, dlat, dv all 0.0000), but same-theta repeats of mined scenes are not bit-identical: 23 of 109 D4 repeated scenes (about 21%) showed spread in some repeat (`mining/*/d4.md`), and RC13 scene (14, 20, 0.2) spread 0.028 (`negatives.md`) |
 | 2 | determinism across two servers | NOT EXECUTED | only one server fits the 6 GB GPU; undetected cross-process nondeterminism possible |
 | 2 | timing | PASS | `timing.md` |
 | 3 | RC01, RC02, RC16, RC17 vs analytic anchors | WARN | `foundation.md`; residuals test the formula structure, not an independent prediction (b_cal and tau_eff come from the same trace) |
@@ -36,11 +36,11 @@ PASS = criterion met as stated; WARN = met with a caveat listed in section 7; NO
 | 5 | G sensitivity on CARLA | NOT EXECUTED | only the mock files `results/g_sensitivity*.md` exist; no CARLA G-sensitivity file was produced |
 | 6 | RC05, RC06, RC08, RC15, RC18 | WARN | `compositional.md`; moving actors start 3-5% low; RC18 limits declared, a_comb mask |
 | 6 | RC04 | WARN | no CARLA positive witness after 92 scanned scenes (reported, not forced) |
-| 7 | RC10, RC11, RC14 and the reveal-time transition | PASS | `occlusion.md`, `occlusion_transition.png`; analytic t* is a one-sided bound, +0.05..+0.22 s |
+| 7 | RC10, RC11, RC14 and the reveal-time transition | WARN | `occlusion.md`, `occlusion_transition.png`; the transition is shown, but the 0.25 s cross-check tolerance cannot be verified as pre-declared (single commit) and the analytic t* lies before the measured bracket in 4 of 6 scenes (a one-sided conservative bound, +0.05..+0.22 s), so the cross-check is weaker than a match |
 | 8 | RC09 (25-member class refuted), RC13 | WARN | `negatives.md`; two headline margins inside the observed repeat spread |
 | 9 | D5 info-gap mining: mock | PASS | `results/mock/mining/infogap/infogap.md` |
-| 9 | D5 info-gap mining: CARLA | PASS | `mining/results/carla/mining/infogap/infogap.md` (small budget, section 5) |
-| 9 | E1 export + `validate_dataset.py`, mock and CARLA | PASS | section 6 |
+| 9 | D5 info-gap mining: CARLA | WARN | `mining/results/carla/mining/infogap/infogap.md`: only 36 scenes; all 6 hits come from seed 1; 4 of 6 hits have V = -inf; one hit (V_hind 0.002) is inside the repeat spread; the search ranks on a graded search signal that favours collision severity (section 5) |
+| 9 | E1 export + `validate_dataset.py`, mock and CARLA | WARN | section 6: validators pass (0 invalid on both), but `history` is null in 1336 of 1372 CARLA rows (only the 36 infogap rows have it), mock `physics_profile` is null by design, and pair rows join the group of the unrecoverable member |
 | 9 | Cosmos appearance variants | NOT EXECUTED | none exist; `parent_id` and `variant_kind` are null in every row |
 
 ## 3. Tables
@@ -87,7 +87,11 @@ CARLA, 2 seeds, 100 scenes per sobol/straddle/bisect run and 40 for cem/bo_lcb (
 
 {{RC03_TAB}}
 
-D4 (`mining/corridor/d4.md`, `mining/rc03/d4.md`): strict near-boundary sets of 16 (corridor) and 63 (rc03) scenes, each re-run 3 times in the same session; 0 of 32 and 0 of 77 repeated rows changed sign or label, but 9 of 32 and 14 of 77 had a nonzero spread, so repeats are not bit-identical.
+D4 (`mining/corridor/d4.md`, `mining/rc03/d4.md`): strict near-boundary sets of 16 (corridor) and 63 (rc03) scenes, each re-run 3 times in the same session; 0 of 32 and 0 of 77 repeated rows changed sign or label, but 9 of 32 and 14 of 77 had a nonzero spread, so repeats are not bit-identical (23 of 109 repeated scenes, about 21%, showed spread in some repeat).
+
+**Re-flag at the max observed spread 0.028.** The numbers above use the Task 5 sigma 0.01666. `scripts/spread_reflag.py` recomputes them from the local records at both values (output `mining/results/carla/mining/sigma028.md`, copied below). At 0.028 the near-threshold sets grow (corridor 16 to 21 scenes, rc03 63 to 88) and the added scenes (5 and 20) were NOT repeated, so the D4 claim 'no repeated row changed label' holds only for the scenes that were repeated, and nothing is known about the others. The summary `near_boundary` count (abs(V_search) < 0.3) is a window about 10 times the spread and is insensitive to sigma. `label_vs_anchor_agree` (corridor) is 0.929 over all scene records; excluding scenes whose analytic margin is inside the noise band changes it to 0.932 at the old sigma and 0.938 at 0.028, so the agreement does not depend on those scenes.
+
+{{SIGMA028}}
 
 ### 3.6 Evidence mix
 
@@ -102,6 +106,13 @@ Mining scenes (all algorithms, 2 seeds):
 {{RC03_MIX}}
 
 Task 7 reveal sweep (`occlusion.md`, reveal-sweep scenes only, RC14 excluded): {{OCC_MIX}}. D5 mixes are in section 5.
+
+### 3.7 Matched pairs (human-readable)
+
+Each pair changes ONE factor and both members are re-labelled with the full R matrix (`verified` = unrecoverable side is `U_*` and recoverable side is `R_REF`). Full lists: `../mining/results/carla/mining/corridor/pairs.md` and `../mining/results/carla/mining/rc03/pairs.md`. Matched-pair counts in the exported dataset are in section 6. Mock pairs: `results/mock/mining/corridor/pairs_bisect_s*.jsonl` (local, not listed here).
+
+{{PAIRS}}
+On the corridor the CARLA flip sits about 1 m later than the analytic boundary on average (section 7).
 
 ## 4. Figures
 
@@ -146,15 +157,23 @@ Dataset summary (computed from the exported files; `size` in bytes of scenes.jso
 {{DS}}
 ```
 
-Locations: CARLA `mining/results/carla/dataset/`; mock `results/mock/dataset/` (repo root, per the global constraint that mock outputs live under `results/mock`). Both are git-ignored: mock scenes.jsonl + traces.npz are about 12.8 MB, CARLA about 5.4 MB (over the roughly 5 MB limit for committing), so only the small md files are committed. Validator output: mock `454 records, 0 invalid`; CARLA `1352 records, 0 invalid` (run after the final export). Only the 36 CARLA infogap rows carry `history`; the 1316 corridor and rc03 rows predate history capture and have `history` null.
+Split groups (`mining/splits.py`; the controller ruling): corridor and rc03 rows are grouped by family plus every non-distance theta factor, so all gap neighbours of a scene share a group; infogap rows are grouped by speed bin (width 1.0 m/s), so every D and t_reveal at that speed stay together. A pair that varies a non-distance factor takes the group of its unrecoverable member for both members. `validate_dataset.py` checks across rows that rows with the same family and non-distance factors share a group, that every pair id has exactly one recoverable and one unrecoverable member in one group, and that each (backend, family) has one `policy_library_id` and one `policy_library_version`.
+
+Pairs: pair members are keyed by (scene id, pair id, role) and never dropped by deduplication; a plain scene with the same theta as a pair member is the row that is dropped (its source file stays listed). An earlier export keyed rows by scene id alone and left 8 of 31 CARLA pair ids with a single role; the corrected CARLA export has 37 pair ids (the pairs files; pairs.md lists 31 distinct ones) with 74 rows, all complete. The mock export has 10 pair ids and 20 rows.
+
+Library identity: `policy_library_id` is the family's library id from its plain records (corridor `corridor_v1`, rc03 `rc03_carla_lc2_full_alat8`, infogap `occ_lc2.0_al8lc2`; the mock corridor records carry none, so the mock id is the fallback `corridor_library`), also applied to pair rows. `policy_library_version` is a hash of the library definition (policy names, versions, terminal modes and non-theta parameters; the `@prefix` wrapper and theta-valued parameters such as prefix_s are not part of it), so it does not change with theta.
+
+Locations: CARLA `mining/results/carla/dataset/`; mock `results/mock/dataset/` (repo root, per the global constraint that mock outputs live under `results/mock`; the brief had named `mining/results/<backend>/dataset`). Both are git-ignored: mock scenes.jsonl + traces.npz are about 12.8 MB and CARLA about 5.4 MB, over the roughly 5 MB limit for committing, so only the small md files are committed. The mock `physics_profile` is null by design: the kinematic stand-in has no CARLA physics profile, and the validator requires null there and a `pp_` id on every CARLA row. Validator output after the fix round: mock `454 records, 0 invalid`; CARLA `1372 records, 0 invalid`. Only the 36 CARLA infogap rows carry `history`; the 1336 corridor and rc03 rows predate history capture and have `history` null (consistently, not an empty list).
 
 ## 7. Known issues, caveats and surprises
 
-**Repeatability.** The Task 5 D4 sigma (0.0167 margin units, from corridor and rc03 repeats) is superseded: the maximum observed CARLA repeat spread across all tasks is **{{MAX_SPREAD}} margin units**, RC13 scene (v 14, D 20, t_reveal 0.2), witness world B ranging 0.0224 .. 0.0504 over four runs (`negatives.md`). It is about 1.7 times the Task 5 sigma. Cost if wrong: claims whose margin is below this spread may not be reproducible. Headline claims whose margin is below 0.028 (computed from the margins in the md files):
+**Repeatability.** {{RC13_SUMMARY}}
+
+**Repeatability (spread).** The Task 5 D4 sigma (0.0167 margin units, from corridor and rc03 repeats) is superseded: the maximum observed CARLA repeat spread across all tasks is **{{MAX_SPREAD}} margin units**, RC13 scene (v 14, D 20, t_reveal 0.2), witness world B ranging 0.0224 .. 0.0504 over four runs (`negatives.md`). It is about 1.7 times the Task 5 sigma. Cost if wrong: claims whose margin is below this spread may not be reproducible. Headline claims whose margin is below 0.028 (computed from the margins in the md files):
 
 {{FLAGS}}
 
-CARLA is not bit-reproducible: a minority of repeated scenes (about 1 episode in 4 in the D4 repeats, 9 of 32 and 14 of 77 rows) show a changed value within a session (sigma 0.0833 m in the corridor units); same-server determinism cases were exact, and cross-session repeats were not measured systematically (the RC12 spread check of 10 scenes of one family is mostly saturated and proves nothing about cross-session spread).
+CARLA is not bit-reproducible: a minority of repeated scenes (23 of 109 repeated scenes (about 21%) showed spread in some repeat: 9 of 32 corridor and 14 of 77 rc03 rows) show a changed value within a session (sigma 0.0833 m in the corridor units); same-server determinism cases were exact, and cross-session repeats were not measured systematically (the RC12 spread check of 10 scenes of one family is mostly saturated and proves nothing about cross-session spread).
 
 **Plant.**
 - Moving actors start 3-5% below their declared speed (warm-up drag, pinned each warm-up tick); residual 2.5-5%; measured t0 speeds are in the md files. Declared actor speeds are nominal upper bounds. RC07 was re-run on the fixed plant (it first ran with the rear actor about 15% slow); its scene moved to rear_gap 100 and the earlier (34, 80, 18) scene no longer holds.
@@ -179,6 +198,13 @@ CARLA is not bit-reproducible: a minority of repeated scenes (about 1 episode in
 - Mixed server sessions: RC12 and RC19 from the earlier session; `Ctx.point` cache keys omit library id and `a_lat_max` (guarded by sweep-name tags); superseded files are excluded from validation by name only.
 - `core_before_rc07_rerun.md` is a verbatim copy of the pre-fix core report.
 - Minor open items: RC16 point-model column is constant True; `foundation.md` preamble still mentions an older bisection step; the RC18 refuted-by-comb column covers only the brake_steer policies; brake-onset smoothed a_long 8.79 vs decel target 6.19 is unexplained; Task 7 figure cosmetics; `negatives.md` prose "sigma is a conservative bound" is contradicted by the 0.028 spread (this report supersedes it).
+- Task 1 (deferred minors): `measure_brake` keeps an invalid-start fit when its retries run out (`bringup.py` lines 50-52); the extra-tick guard in `plant_carla.py` (line 306) mismatches and the non-monotone branch has no test; the steer response is nonlinear; `response_delay_s` only means 'at most one tick'.
+- Task 2 (deferred minors): the steer test is confounded by a 30-40% speed loss; tests are missing for the `hold_i` hand-off, `ScriptedActor` `ki` and the invalid-start None case; the scripted actor decel lags the nominal b under PI (a world-fidelity gap).
+- Task 3: the fix report did not paste the pytest output (the implementer stated 71 passed).
+- Task 5: the sigma loop has no explicit convergence assert; rc03 mining uses widened ranges (v up to 24, gap up to 60) and CARLA conventions (a_lat_max 8, lc_time 2.0), so the mock and CARLA rc03 tables are not comparable.
+- Task 6: the first assertion of the harness `vmin` test is vacuous (an `or`).
+- Task 7: the `history_check` threshold test only asserts the constant.
+- Task 8: the marginal-scene rule has a cost: with sigma 0.0167 the RC13 headline was 4 scenes; at the observed spread 0.028 it is 2 (section 7, Repeatability); `negatives.md` wording is loose or stale ('within about 10%', 'single runs' in Plant caveats, 'sigma is a conservative bound'), and its Reading paragraph omits the E9 result (the exact envelope held to the 1 m reserve disagrees with the evidence in 4 of 4 scenes).
 - Process notes: subagents ran on Sonnet 5.5 at medium effort; one controller-made doc fix (f644025) bypassed the implementer.
 - D5 CARLA used a small budget by design (about 36 scenes); it is not a mining comparison between cem and straddle.
 

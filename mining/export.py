@@ -22,6 +22,7 @@ import pandas as pd
 
 import core
 import records as RC
+import splits
 
 SCHEMA_VERSION = 1
 KEEP_CATS = ("unrecoverable", "edge", "planner_failure")
@@ -184,18 +185,39 @@ def world_set_id(rec):
     return f"{rec['family_id']}_ws_{RC.checksum({'worlds': rec['worlds'], 'spec': ws})[:8]}"
 
 
-def case_row(rec, pair=None, sources=()):
+def library_definition(desc, theta):
+    """The library DEFINITION: policy ids, versions, terminal modes and non-theta parameters.  A `@prefix` wrapper is a scene value (the prefix
+    length comes from theta, and at prefix 0 the wrapper is absent), so the wrapped (inner) policy is the library member; parameters whose key is a
+    theta factor are dropped too."""
+    def core(d):
+        d = d.get("inner") or d
+        return {"name": d["name"], "version": d.get("version"), "terminal": d.get("terminal"),
+                "params": {k: v for k, v in (d.get("params") or {}).items() if k not in theta}}
+    return [core(d) for d in desc]
+
+
+def row_id(sid, pair):
+    """Plain scenes: the scene id.  Pair members: scene id + pair id + role, so a theta shared by two pairs (or by both roles of one pair)
+    never collapses a pair into a half-pair."""
+    return sid if pair is None else f"{sid}.{pair['pair_id']}.{pair['role']}"
+
+
+def case_row(rec, pair=None, sources=(), library_id=None, group=None):
     """One E1 row from an ExecutionRecord JSON.  Non-applicable fields are null (pair_*, parent_id, variant_kind, history without
-    keep_history, physics_profile on the mock plant), never an empty string / 0.  Labels are copied from the record, which derived them
-    with contract.classify; the validator recomputes them."""
+    keep_history, physics_profile on the mock plant by design: the kinematic stand-in has no CARLA physics profile), never an empty string / 0.
+    Labels are copied from the record, which derived them with contract.classify; the validator recomputes them.
+    library_id: the family's library id (pair members carry no record-level id, so export_records resolves it from the family's plain records);
+    group: split group (splits.split_group of the scene, or of the unrecoverable member for pair rows)."""
     sid = scene_id(f"{rec['family_id']}/{rec['case_id']}", rec["theta"])
+    rid = row_id(sid, pair)
     desc = rec["policy_descriptors"]
     row = {
-        "schema_version": E1_VERSION, "id": sid, "case_id": rec["case_id"], "family_id": rec["family_id"],
-        "split_group": pair["pair_id"] if pair else rec["split_group"],
+        "schema_version": E1_VERSION, "id": rid, "case_id": rec["case_id"], "family_id": rec["family_id"],
+        "split_group": group or splits.split_group(rec["family_id"], rec["theta"]),
         "backend": rec["backend"], "evidence_scope": rec["evidence_scope"], "seed": rec["seed"], "theta": rec["theta"],
         "history": history_of(rec),
-        "policy_library_id": rec.get("library_id") or f"{rec['family_id']}_library", "policy_library_version": RC.checksum(desc)[:8],
+        "policy_library_id": library_id or rec.get("library_id") or f"{rec['family_id']}_library",
+        "policy_library_version": RC.checksum(library_definition(desc, rec["theta"]))[:8],
         "policy_library": list(rec["policies"]),
         "world_set_id": world_set_id(rec), "world_set": list(rec["worlds"]),
         "R": rec["R_raw"], "R_search": rec["R_norm"], "R_mask": [[0 if x is None else 1 for x in r_] for r_ in rec["R_raw"]],
@@ -208,7 +230,7 @@ def case_row(rec, pair=None, sources=()):
         "parent_id": None, "variant_kind": None,        # Cosmos appearance variants would set both; none exist yet
         "sources": list(sources), "code_version": rec["code_version"], "record_checksum": rec["checksum"],
         "invalid_reasons": rec.get("invalid_reasons", []),
-        "trace_path": "traces.npz", "trace_key": sid,
+        "trace_path": "traces.npz", "trace_key": rid,
     }
     return row
 
@@ -253,27 +275,47 @@ def collect_records(root, families=SOURCE_FAMILIES):
 
 
 def export_records(root, out_dir, backend, families=SOURCE_FAMILIES):
-    """Write out_dir/scenes.jsonl (E1.1 rows) and out_dir/traces.npz.  Duplicate scene ids (same family, case and theta from several
-    algorithms) keep ONE row (pair member first, then the first source) and list every source file in `sources`; the other measurements of the
-    same theta are not merged (CARLA re-runs of one theta differ by the repeat spread)."""
+    """Write out_dir/scenes.jsonl (E1.1 rows) and out_dir/traces.npz.
+    Plain scenes: duplicate scene ids (same family, case and theta from several algorithms) keep ONE row (the first source) and list every source
+    file in `sources`; other measurements of the same theta are not merged (CARLA re-runs of one theta differ by the repeat spread).
+    Pair members are NEVER dropped: they are keyed by (scene id, pair id, role), and a plain duplicate of a pair member's theta is the one that is
+    dropped.  Both members take the split group of the unrecoverable member.  The policy_library_id of a family is read from its plain records
+    and applied to its pair rows."""
     os.makedirs(out_dir, exist_ok=True)
-    rows, arrays, srcs = {}, {}, {}
-    for rec, pair, src in collect_records(root, families):
+    items = collect_records(root, families)
+    lib_of = {}
+    for rec, pair, _ in items:
+        if pair is None and rec.get("library_id"):
+            lib_of.setdefault(rec["family_id"], rec["library_id"])
+    pair_group = {}
+    for rec, pair, _ in items:
+        if pair is not None and pair["role"] == "unrecoverable":
+            pair_group[pair["pair_id"]] = splits.split_group(rec["family_id"], rec["theta"])
+    rows, arrays, srcs, pair_sids = {}, {}, {}, {}
+    for rec, pair, src in items:
         if rec["backend"] != backend:
             raise RuntimeError(f"record backend {rec['backend']!r} != requested {backend!r}; mock and CARLA are exported separately")
-        row = case_row(rec, pair)
-        srcs.setdefault(row["id"], []).append(src)
-        if row["id"] in rows:
+        sid = scene_id(f"{rec['family_id']}/{rec['case_id']}", rec["theta"])
+        rid = row_id(sid, pair)
+        srcs.setdefault(rid, []).append(src)
+        if rid in rows:
             continue
-        rows[row["id"]] = row
-        arrays[f"{row['id']}/R"] = r_array(rec["R_raw"])
-        arrays[f"{row['id']}/R_search"] = r_array(rec["R_norm"])
+        if pair is None and sid in pair_sids:
+            for r_ in pair_sids[sid]:
+                srcs[r_].append(src)                   # keep provenance: the plain duplicate's source file is listed on the pair rows
+            continue                                   # plain duplicate of a pair member's theta: the pair row carries it
+        if pair is not None:
+            pair_sids.setdefault(sid, []).append(rid)
+        row = case_row(rec, pair, library_id=lib_of.get(rec["family_id"]), group=pair_group.get(pair["pair_id"]) if pair else None)
+        rows[rid] = row
+        arrays[f"{rid}/R"] = r_array(rec["R_raw"])
+        arrays[f"{rid}/R_search"] = r_array(rec["R_norm"])
         if row["history"] is not None:
             for k, v in history_arrays(row["history"]).items():
-                arrays[f"{row['id']}/{k}"] = v
+                arrays[f"{rid}/{k}"] = v
     with open(f"{out_dir}/scenes.jsonl", "w") as f:
-        for sid, row in rows.items():
-            row["sources"] = sorted(set(srcs[sid]))
+        for rid, row in rows.items():
+            row["sources"] = sorted(set(srcs[rid]))
             f.write(json.dumps(row) + "\n")
     np.savez_compressed(f"{out_dir}/traces.npz", **arrays)
     return len(rows), sum(r["history"] is not None for r in rows.values())

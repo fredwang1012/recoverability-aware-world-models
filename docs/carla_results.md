@@ -22,7 +22,7 @@ Labels (`R_REF`, `U_LIBRARY`, `U_INFORMATION`, ...) come only from `contract.cla
 - Physics profile `pp_381b4c6e55` (Tesla Model 3, knob = max_brake_torque at fixed tire_friction 5.0), margin config `margin.DEFAULT_V2` (reserve c = 1.0 m, eps = 0.0, horizon 8 s); both ids are written into every record. Blueprints: {"ego": "vehicle.tesla.model3", "static": "vehicle.audi.a2", "mover": "vehicle.mini.cooper"}. World settings: {"synchronous_mode": true, "fixed_delta_seconds": 0.05, "substepping": true, "max_substep_delta_time": 0.01, "max_substeps": 10, "no_rendering_mode": true}.
 - One CARLA server on port 2000 at a time (only one instance fits the 6 GB GPU), custom map `straight_2lane`, headless, no sensors.
 - Seeds: mining runs use seeds 0 and 1; D5 uses seeds 0 and 1; scenario-level CARLA runs are deterministic functions of theta apart from the plant noise described in section 7.
-- Server restarts: (a) after the hang during the Task 4 fix round (the controller restarted the single instance; selftest keep-test v0 shifted from 11.97 to 11.87 m/s afterwards, brake check 8.91 to 9.07 m/s^2); the Task 2 bring-up predates it; (b) a crash before the Task 9 D5 run, again restarted as a single instance on port 2000, selftest PASS on the new session (`mining/results/carla/selftest.txt` is that rerun). RC12 and RC19 records are from the session before restart (a).
+- Server restarts: (a) after the hang during the Task 4 fix round (the controller restarted the single instance; selftest keep-test v0 shifted from 11.97 to 11.87 m/s afterwards, as recorded in `core.md` (Server sessions); the current `selftest.txt` brake check reads 9.07 m/s^2); the Task 2 bring-up predates it; (b) a crash before the Task 9 D5 run, again restarted as a single instance on port 2000, selftest PASS on the new session (`mining/results/carla/selftest.txt` is that rerun). RC12 and RC19 records are from the session before restart (a).
 
 ## 2. Acceptance checklist
 
@@ -32,7 +32,7 @@ PASS = criterion met as stated; WARN = met with a caveat listed in section 7; NO
 |---|---|---|---|
 | 1 | physics profile, monotone brake map covers 5-9 m/s^2 | WARN | `calibration.md`, `physics_profile.json`; friction 5.0 non-physical, decel range 4.77..17.51 is a torque-knob abstraction |
 | 2 | bring-up selftest | PASS | `selftest.txt` (8 checks) |
-| 2 | determinism, same server repeats | PASS | `determinism.md` (max dx, dlat, dv all 0.0000) |
+| 2 | determinism, same server repeats | WARN | `determinism.md` is exact on its two cases (max dx, dlat, dv all 0.0000), but same-theta repeats of mined scenes are not bit-identical: 23 of 109 D4 repeated scenes (about 21%) showed spread in some repeat (`mining/*/d4.md`), and RC13 scene (14, 20, 0.2) spread 0.028 (`negatives.md`) |
 | 2 | determinism across two servers | NOT EXECUTED | only one server fits the 6 GB GPU; undetected cross-process nondeterminism possible |
 | 2 | timing | PASS | `timing.md` |
 | 3 | RC01, RC02, RC16, RC17 vs analytic anchors | WARN | `foundation.md`; residuals test the formula structure, not an independent prediction (b_cal and tau_eff come from the same trace) |
@@ -45,11 +45,11 @@ PASS = criterion met as stated; WARN = met with a caveat listed in section 7; NO
 | 5 | G sensitivity on CARLA | NOT EXECUTED | only the mock files `results/g_sensitivity*.md` exist; no CARLA G-sensitivity file was produced |
 | 6 | RC05, RC06, RC08, RC15, RC18 | WARN | `compositional.md`; moving actors start 3-5% low; RC18 limits declared, a_comb mask |
 | 6 | RC04 | WARN | no CARLA positive witness after 92 scanned scenes (reported, not forced) |
-| 7 | RC10, RC11, RC14 and the reveal-time transition | PASS | `occlusion.md`, `occlusion_transition.png`; analytic t* is a one-sided bound, +0.05..+0.22 s |
+| 7 | RC10, RC11, RC14 and the reveal-time transition | WARN | `occlusion.md`, `occlusion_transition.png`; the transition is shown, but the 0.25 s cross-check tolerance cannot be verified as pre-declared (single commit) and the analytic t* lies before the measured bracket in 4 of 6 scenes (a one-sided conservative bound, +0.05..+0.22 s), so the cross-check is weaker than a match |
 | 8 | RC09 (25-member class refuted), RC13 | WARN | `negatives.md`; two headline margins inside the observed repeat spread |
 | 9 | D5 info-gap mining: mock | PASS | `results/mock/mining/infogap/infogap.md` |
-| 9 | D5 info-gap mining: CARLA | PASS | `mining/results/carla/mining/infogap/infogap.md` (small budget, section 5) |
-| 9 | E1 export + `validate_dataset.py`, mock and CARLA | PASS | section 6 |
+| 9 | D5 info-gap mining: CARLA | WARN | `mining/results/carla/mining/infogap/infogap.md`: only 36 scenes; all 6 hits come from seed 1; 4 of 6 hits have V = -inf; one hit (V_hind 0.002) is inside the repeat spread; the search ranks on a graded search signal that favours collision severity (section 5) |
+| 9 | E1 export + `validate_dataset.py`, mock and CARLA | WARN | section 6: validators pass (0 invalid on both), but `history` is null in 1336 of 1372 CARLA rows (only the 36 infogap rows have it), mock `physics_profile` is null by design, and pair rows join the group of the unrecoverable member |
 | 9 | Cosmos appearance variants | NOT EXECUTED | none exist; `parent_id` and `variant_kind` are null in every row |
 
 ## 3. Tables
@@ -168,7 +168,44 @@ CARLA, 2 seeds, 100 scenes per sobol/straddle/bisect run and 40 for cem/bo_lcb (
 | sobol | 100.00 +/- 0.00 | 29.50 +/- 0.98 | 70.50 +/- 0.98 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 36.50 +/- 2.94 | n/a | n/a | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | n/a | n/a |
 | straddle | 100.00 +/- 0.00 | 67.50 +/- 4.90 | 32.50 +/- 4.90 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 89.50 +/- 0.98 | n/a | n/a | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | n/a | n/a |
 
-D4 (`mining/corridor/d4.md`, `mining/rc03/d4.md`): strict near-boundary sets of 16 (corridor) and 63 (rc03) scenes, each re-run 3 times in the same session; 0 of 32 and 0 of 77 repeated rows changed sign or label, but 9 of 32 and 14 of 77 had a nonzero spread, so repeats are not bit-identical.
+D4 (`mining/corridor/d4.md`, `mining/rc03/d4.md`): strict near-boundary sets of 16 (corridor) and 63 (rc03) scenes, each re-run 3 times in the same session; 0 of 32 and 0 of 77 repeated rows changed sign or label, but 9 of 32 and 14 of 77 had a nonzero spread, so repeats are not bit-identical (23 of 109 repeated scenes, about 21%, showed spread in some repeat).
+
+**Re-flag at the max observed spread 0.028.** The numbers above use the Task 5 sigma 0.01666. `scripts/spread_reflag.py` recomputes them from the local records at both values (output `mining/results/carla/mining/sigma028.md`, copied below). At 0.028 the near-threshold sets grow (corridor 16 to 21 scenes, rc03 63 to 88) and the added scenes (5 and 20) were NOT repeated, so the D4 claim 'no repeated row changed label' holds only for the scenes that were repeated, and nothing is known about the others. The summary `near_boundary` count (abs(V_search) < 0.3) is a window about 10 times the spread and is insensitive to sigma. `label_vs_anchor_agree` (corridor) is 0.929 over all scene records; excluding scenes whose analytic margin is inside the noise band changes it to 0.932 at the old sigma and 0.938 at 0.028, so the agreement does not depend on those scenes.
+
+Task 5 used sigma = 0.01666 (observed corridor and rc03 repeats). Task 8 later observed a spread of 0.028 (RC13 scene 14/20/0.2). This file recomputes the near-threshold sets from the local records at both values. Only scenes that already have D4 repeats can be checked for a changed label; the others are listed as NOT REPEATED and nothing is assumed about them. Margin units: clearance metres / q_clear = 5.0, so 0.028 = 0.14 m.
+
+#### corridor
+
+Pool: 677 distinct scenes (records + pair members), label-grade V = max_j min_w R_raw.
+
+| sigma (margin units) | scenes with finite V, abs(V - eps) <= sigma | of which with D4 repeats | of which NOT REPEATED | repeated rows UNRESOLVED (label side/kind changed) |
+|---|---|---|---|---|
+| 0.01666 | 16 | 16 | 0 | 0 |
+| 0.028 | 21 | 16 | 5 | 0 |
+
+D4 rows (all, including the extended set): 32; rows with spread > 0: 9; max spread 0.00769; rows UNRESOLVED over all repeats: 0.
+
+near_boundary (summary.md definition, abs(V_search) < 0.3): 523 of 722 scene records; the window is about 10 times the spread, so it is insensitive to sigma; 24 records have abs(V_search) <= 0.028 (V_search is the finite search grade, so this is only an indicator).
+
+label_vs_anchor_agree excluding scenes with abs(analytic margin) <= 0.083 m (= 0.01666 x q_clear 5): 668/717 = 0.932; scenes excluded as inside the noise band: 5
+label_vs_anchor_agree excluding scenes with abs(analytic margin) <= 0.140 m (= 0.028 x q_clear 5): 667/711 = 0.938; scenes excluded as inside the noise band: 11
+label_vs_anchor_agree over all 722 R/U-labelled scene records: 671/722 = 0.929.
+
+#### rc03
+
+Pool: 639 distinct scenes (records + pair members), label-grade V = max_j min_w R_raw.
+
+| sigma (margin units) | scenes with finite V, abs(V - eps) <= sigma | of which with D4 repeats | of which NOT REPEATED | repeated rows UNRESOLVED (label side/kind changed) |
+|---|---|---|---|---|
+| 0.01666 | 63 | 63 | 0 | 0 |
+| 0.028 | 88 | 68 | 20 | 0 |
+
+D4 rows (all, including the extended set): 77; rows with spread > 0: 14; max spread 0.01666; rows UNRESOLVED over all repeats: 0.
+
+near_boundary (summary.md definition, abs(V_search) < 0.3): 477 of 689 scene records; the window is about 10 times the spread, so it is insensitive to sigma; 96 records have abs(V_search) <= 0.028 (V_search is the finite search grade, so this is only an indicator).
+
+label_vs_anchor_agree: no analytic anchor for this family (n/a).
+
 
 ### 3.6 Evidence mix
 
@@ -199,6 +236,28 @@ Mining scenes (all algorithms, 2 seeds):
 | bo_lcb | 13 | 67 |
 
 Task 7 reveal sweep (`occlusion.md`, reveal-sweep scenes only, RC14 excluded): R_REF = 36, U_INFORMATION = 43, U_LIBRARY = 3. D5 mixes are in section 5.
+
+### 3.7 Matched pairs (human-readable)
+
+Each pair changes ONE factor and both members are re-labelled with the full R matrix (`verified` = unrecoverable side is `U_*` and recoverable side is `R_REF`). Full lists: `../mining/results/carla/mining/corridor/pairs.md` and `../mining/results/carla/mining/rc03/pairs.md`. Matched-pair counts in the exported dataset are in section 6. Mock pairs: `results/mock/mining/corridor/pairs_bisect_s*.jsonl` (local, not listed here).
+
+**corridor**: 15 pair rows in `mining/corridor/pairs.md`; representative pairs (first verified pair for each varied factor):
+
+| pair | description (same scene except ...) | unrecoverable side | recoverable side | verified |
+|---|---|---|---|---|
+| corridor_bisect_s0_pair000 | same scene except gap 35.18 m (unrecoverable side) vs 35.62 m (recoverable side); held fixed: v 17.32 m/s, tau 0.15 s, prefix 0.45 s, b 6.19 m/s^2 | U_LIBRARY | R_REF | True |
+| corridor_bisect_s0_pair001 | same scene except v 8.83 m/s (unrecoverable side) vs 8.653 m/s (recoverable side); held fixed: gap 11.94 m, tau 0.15 s, prefix 0.45 s, b 6.19 m/s^2 | U_LIBRARY | R_REF | True |
+| corridor_bisect_s0_pair006 | same scene except prefix 0.45 s (unrecoverable side) vs 0.4 s (recoverable side); held fixed: gap 32.55 m, v 17.32 m/s, tau 0 s, b 6.19 m/s^2 | U_LIBRARY | R_REF | True |
+
+**rc03**: 16 pair rows in `mining/rc03/pairs.md`; representative pairs (first verified pair for each varied factor):
+
+| pair | description (same scene except ...) | unrecoverable side | recoverable side | verified |
+|---|---|---|---|---|
+| rc03_bisect_s0_pair000 | same scene except gap 32.6 m (unrecoverable side) vs 33.29 m (recoverable side); held fixed: v 20.94 m/s, tau 0.15 s, b 6.19 m/s^2 | U_LIBRARY | R_REF | True |
+| rc03_bisect_s0_pair001 | same scene except v 12.65 m/s (unrecoverable side) vs 12.45 m/s (recoverable side); held fixed: gap 16.16 m, tau 0.15 s, b 6.19 m/s^2 | U_LIBRARY | R_REF | True |
+| rc03_bisect_s0_pair005 | same scene except tau 0.15 s (unrecoverable side) vs 0.1 s (recoverable side); held fixed: gap 32.6 m, v 20.94 m/s, b 6.19 m/s^2 | U_LIBRARY | R_REF | True |
+
+On the corridor the CARLA flip sits about 1 m later than the analytic boundary on average (section 7).
 
 ## 4. Figures
 
@@ -238,7 +297,7 @@ Info-gap scene = V_hind >= eps and V < eps. Family = RC10/RC11 with theta = (D, 
 
 ### D5 info-gap mining - backend: MOCK (MOCK plant: kinematic stand-in, NOT CARLA)
 
-Family: RC10/RC11 (`cases/occlusion`), theta = (D, v, t_reveal) in D [14, 34] m, v [12, 18] m/s, t_reveal [0, 1.2] s on the 0.05 s tick grid (D to 0.1 m, v to 0.1 m/s).  Objective: maximise V_hind - V subject to V_hind >= eps (eps = 0); an info-gap scene is V_hind >= eps and V < eps.  Search algorithms see only the finite search signal (cem: -(V_hind - V) from R_norm for feasible scenes, penalty otherwise; straddle/sobol: V_search from R_norm); labels, V, V_hind and the objective come from the full record (R_raw, contract.classify).  When V = -inf the label-grade gap is +inf; those scenes are listed separately and never mixed with finite gaps.  2 seed(s) x 24 scenes per algorithm, batch 3; wall 265 s.
+Family: RC10/RC11 (`cases/occlusion`), theta = (D, v, t_reveal) in D [14, 34] m, v [12, 18] m/s, t_reveal [0, 1.2] s on the 0.05 s tick grid (D to 0.1 m, v to 0.1 m/s).  Objective: maximise V_hind - V subject to V_hind >= eps (eps = 0); an info-gap scene is V_hind >= eps and V < eps.  Search algorithms see only the finite search signal (cem: -(V_hind - V) from R_norm for feasible scenes, penalty otherwise; straddle/sobol: V_search from R_norm); labels, V, V_hind and the objective come from the full record (R_raw, contract.classify).  When V = -inf the label-grade gap is +inf; those scenes are listed separately and never mixed with finite gaps.  2 seed(s) x 24 scenes per algorithm, batch 3; wall 1 s.
 
 ### Per algorithm
 
@@ -300,6 +359,23 @@ t* = Task 7 policy-matched analytic reveal threshold for this (D, v) (the reveal
 | cem | 1 | 20.4 | 16.3 | 0.6 | -inf | 0.026 | inf | -0.139 | 0.74 | 27.28 | U_INFORMATION |
 
 Comparison with the Task 7 transition: 44 info-gap scene(s); 44 lie below the analytic common-stop distance (a necessary condition); 0 have t_reveal earlier than the analytic t* (Task 7 measured the threshold 0.05 to 0.22 s AFTER t*, so t_reveal slightly below t* is not by itself a contradiction).
+Both are necessary conditions only: they do not predict a hit. The converse is checked below: R_REF scenes AFTER t* and below D_stop would be counter-examples to 'late reveal below the stopping distance gives an info gap'; those within 0.2 m of D_stop are the expected edge cases (the analytic D_stop uses b_cal and tau_eff, which carry the plant noise).
+
+### R_REF scenes after t* and below D_stop
+
+| algo | seed | D (m) | v (m/s) | t_reveal (s) | t* (s) | D_stop - D (m) | V | within 0.2 m of D_stop |
+|---|---|---|---|---|---|---|---|---|
+| cem | 0 | 20.1 | 13.7 | 0.85 | 0.284 | 0.12 | 0.103 | yes |
+| sobol | 1 | 26.8 | 16.2 | 0.9 | 0.678 | 0.19 | 0.110 | yes |
+| straddle | 1 | 26.8 | 16.2 | 0.9 | 0.678 | 0.19 | 0.110 | yes |
+| straddle | 1 | 15.9 | 12 | 0.15 | -0.011 | 0.29 | 0.088 | no |
+| straddle | 1 | 16.3 | 12.2 | 1.2 | 0.015 | 0.34 | 0.045 | no |
+| straddle | 1 | 31.5 | 18 | 1.1 | 0.869 | 0.98 | 0.074 | no |
+| cem | 1 | 24.5 | 15.7 | 0.5 | 0.490 | 1.05 | 0.140 | no |
+| straddle | 0 | 17.4 | 13.1 | 0.2 | 0.034 | 1.35 | 0.080 | no |
+| cem | 1 | 26.8 | 17.1 | 0.7 | 0.488 | 2.87 | 0.042 | no |
+| straddle | 1 | 20.2 | 14.9 | 0.1 | 0.100 | 3.14 | 0.102 | no |
+| straddle | 1 | 22.2 | 16.1 | 0.2 | 0.124 | 4.50 | 0.081 | no |
 Scenes labelled U_INFORMATION that are not info-gap by the objective: 0 (must be 0; U_INFORMATION implies V_hind >= eps and V < eps).
 
 
@@ -307,7 +383,7 @@ Scenes labelled U_INFORMATION that are not info-gap by the objective: 0 (must be
 
 ### D5 info-gap mining - backend: CARLA
 
-Family: RC10/RC11 (`cases/occlusion`), theta = (D, v, t_reveal) in D [14, 34] m, v [12, 18] m/s, t_reveal [0, 1.2] s on the 0.05 s tick grid (D to 0.1 m, v to 0.1 m/s).  Objective: maximise V_hind - V subject to V_hind >= eps (eps = 0); an info-gap scene is V_hind >= eps and V < eps.  Search algorithms see only the finite search signal (cem: -(V_hind - V) from R_norm for feasible scenes, penalty otherwise; straddle/sobol: V_search from R_norm); labels, V, V_hind and the objective come from the full record (R_raw, contract.classify).  When V = -inf the label-grade gap is +inf; those scenes are listed separately and never mixed with finite gaps.  2 seed(s) x 9 scenes per algorithm, batch 3; wall 253 s.
+Family: RC10/RC11 (`cases/occlusion`), theta = (D, v, t_reveal) in D [14, 34] m, v [12, 18] m/s, t_reveal [0, 1.2] s on the 0.05 s tick grid (D to 0.1 m, v to 0.1 m/s).  Objective: maximise V_hind - V subject to V_hind >= eps (eps = 0); an info-gap scene is V_hind >= eps and V < eps.  Search algorithms see only the finite search signal (cem: -(V_hind - V) from R_norm for feasible scenes, penalty otherwise; straddle/sobol: V_search from R_norm); labels, V, V_hind and the objective come from the full record (R_raw, contract.classify).  When V = -inf the label-grade gap is +inf; those scenes are listed separately and never mixed with finite gaps.  2 seed(s) x 9 scenes per algorithm, batch 3; wall 0 s.
 
 ### Per algorithm
 
@@ -330,14 +406,24 @@ t* = Task 7 policy-matched analytic reveal threshold for this (D, v) (the reveal
 | cem | 1 | 20.8 | 16 | 0.75 | -inf | 0.002 | inf | -0.032 | 0.78 | 26.41 | U_INFORMATION |
 
 Comparison with the Task 7 transition: 6 info-gap scene(s); 6 lie below the analytic common-stop distance (a necessary condition); 0 have t_reveal earlier than the analytic t* (Task 7 measured the threshold 0.05 to 0.22 s AFTER t*, so t_reveal slightly below t* is not by itself a contradiction).
+Both are necessary conditions only: they do not predict a hit. The converse is checked below: R_REF scenes AFTER t* and below D_stop would be counter-examples to 'late reveal below the stopping distance gives an info gap'; those within 0.2 m of D_stop are the expected edge cases (the analytic D_stop uses b_cal and tau_eff, which carry the plant noise).
+
+### R_REF scenes after t* and below D_stop
+
+| algo | seed | D (m) | v (m/s) | t_reveal (s) | t* (s) | D_stop - D (m) | V | within 0.2 m of D_stop |
+|---|---|---|---|---|---|---|---|---|
+| straddle | 0 | 20.4 | 13.8 | 1.15 | 0.306 | 0.07 | 0.051 | yes |
+| straddle | 1 | 26.8 | 16.2 | 0.9 | 0.678 | 0.19 | 0.114 | yes |
+| cem | 1 | 24.5 | 15.7 | 0.5 | 0.490 | 1.05 | 0.044 | no |
 Scenes labelled U_INFORMATION that are not info-gap by the objective: 0 (must be 0; U_INFORMATION implies V_hind >= eps and V < eps).
 
 
 **Reading of the D5 results.** Budget: 2 algorithms x 2 seeds x 9 scenes = 36 CARLA scenes (cem and straddle, batch 3), 253 s of wall time for the run (the md wall figure); nothing was tuned after seeing results.
 
-- CARLA found 6 info-gap scenes in 36 (cem 3 of 18, straddle 3 of 18), all labelled `U_INFORMATION` by the evidence and all below the analytic common-stop distance. Only 2 have a finite gap (V_hind - V = 0.188 for D 26.8, v 17.1, t_reveal 0.7, and 0.176 for D 30.6, v 17.9, t_reveal 1.1); the other 4 have V = -inf (every library policy collides in some world), so their label-grade gap is infinite and is not ranked against the finite ones. All six were found with seed 1; seed 0 found none in either algorithm, so the counts are far too small to rank cem against straddle.
-- The mock run (144 scenes, `results/mock/mining/infogap/infogap.md`) found 13 (sobol), 18 (cem) and 13 (straddle) of 48 each, with a larger finite share and a maximum finite gap of 0.283 / 0.323 / 0.283. Mock and CARLA are different plants and are not compared quantitatively. One theta appears in both runs (D 24.4, v 17.6, t_reveal 0.5): mock V = -0.163 with V_hind 0.120, CARLA V = -inf with V_hind 0.055.
-- Comparison with the Task 7 sweep transition: Task 7 measured the R_REF to U_INFORMATION threshold 0.05 to 0.22 s after the analytic t* (v 14 and 18 grid). The six CARLA info-gap scenes lie 0.21, 0.32, 0.38, 0.42, 0.78 and 0.95 s after their analytic t*, i.e. at or beyond the upper end of the Task 7 offset range, none before t*. This is consistent with the Task 7 picture (info gap appears after the threshold and below the common-stop distance); it is not a new measurement of the threshold, because the search points are not on a fixed (D, v) line. The search algorithms did not concentrate on the transition band within 9 scenes per run.
+- CARLA found 6 info-gap scenes in 36 (cem 3 of 18, straddle 3 of 18), all labelled `U_INFORMATION` by the evidence and all below the analytic common-stop distance. Only 2 have a finite gap (V_hind - V = 0.188 for D 26.8, v 17.1, t_reveal 0.7, and 0.176 for D 30.6, v 17.9, t_reveal 1.1). The other 4 have V = -inf: the label-grade V is -inf when every policy of the library has, in some world, either a collision or a failed terminal Boolean (the terminal test `-inf` convention), so their label-grade gap is infinite; they are not ranked against the finite ones. All six hits come from seed 1; seed 0 found none in either algorithm, so the counts are far too small to rank cem against straddle. One of the six is not robust (see the last bullet).
+- **Search-objective bias.** cem and straddle rank scenes on the search-grade matrix `R_norm`, where a `-inf` label-grade entry becomes a graded, finite severity. A collision therefore looks like a large but finite negative value to the search, so cem (which minimises -(V_hind - V)) is pulled toward collision-severity scenes and away from finite-gap scenes, whose search gap is smaller. The label-grade list above is unaffected, but the mix of hits is: mock cem has 11 of its 18 hits at V = -inf; CARLA has 4 of 6. The finite-gap scenes (the ones with a graded margin and the more informative ones) are the minority of what the search surfaces. A search signal that keeps V = -inf apart from graded V would be needed to target finite gaps; this was not tried.
+- The mock run (144 scenes, `results/mock/mining/infogap/infogap.md`) found 13 (sobol), 18 (cem) and 13 (straddle) of 48 each, with a maximum finite gap of 0.283 / 0.323 / 0.283. Mock and CARLA are different plants and are not compared quantitatively. One theta appears in both runs (D 24.4, v 17.6, t_reveal 0.5): mock V = -0.163 with V_hind 0.120, CARLA V = -inf with V_hind 0.055.
+- Comparison with the Task 7 sweep transition: Task 7 measured the R_REF to U_INFORMATION threshold 0.05 to 0.22 s after the analytic t* (v 14 and 18 grid). The six CARLA info-gap scenes lie 0.21, 0.32, 0.38, 0.42, 0.78 and 0.95 s after their analytic t*, i.e. at or beyond the upper end of the Task 7 offset range, none before t*, and all below the common-stop distance. Those two conditions are necessary, not sufficient: the converse table in `mining/infogap/infogap.md` lists the R_REF scenes that are after t* and below D_stop. There are three on CARLA: two within 0.2 m of D_stop (D 20.4, v 13.8, t_reveal 1.15, 0.07 m below D_stop; D 26.8, v 16.2, t_reveal 0.9, 0.19 m below), which are edge cases of the analytic distance (it uses b_cal and tau_eff, which carry the plant noise), and one 1.05 m below D_stop (D 24.5, v 15.7, t_reveal 0.5) whose reveal is only 0.01 s after t*, inside the Task 7 offset range. The search did not concentrate on the transition band within 9 scenes per run, and this is not a new measurement of the threshold because the points are not on a fixed (D, v) line.
 - Robustness: the scene D 20.8, v 16, t_reveal 0.75 has V_hind = 0.002, below the observed repeat spread of 0.028, so its info-gap label is not robust (flagged in section 7); the others have V_hind of 0.055 or more.
 - This does not show that cem or straddle are good info-gap miners; it shows the pipeline (family, search signal, full-record objective, labels) works on CARLA.
 - The mock dataset holds 164 infogap rows rather than 144 because an earlier, interrupted mock pass left 36-scene sobol and cem checkpoints on disk; the summary table above uses the first 24 scenes per run.
@@ -351,28 +437,32 @@ Dataset summary (computed from the exported files; `size` in bytes of scenes.jso
 ```
 {
  "carla": {
-  "n": 1352,
+  "n": 1372,
   "hist": 36,
-  "pairs": 54,
+  "pair_rows": 74,
+  "pair_ids": 37,
+  "pair_ids_complete": 37,
   "fam": {
-   "corridor": 677,
+   "corridor": 680,
    "infogap": 36,
-   "rc03": 639
+   "rc03": 656
   },
   "ev": {
-   "R_REF": 554,
+   "R_REF": 561,
    "U_INFORMATION": 6,
-   "U_LIBRARY": 792
+   "U_LIBRARY": 805
   },
   "pp": [
    "pp_381b4c6e55"
   ],
-  "size": 5448175
+  "size": 5565703
  },
  "mock": {
   "n": 454,
   "hist": 164,
-  "pairs": 20,
+  "pair_rows": 20,
+  "pair_ids": 10,
+  "pair_ids_complete": 10,
   "fam": {
    "corridor": 290,
    "infogap": 164
@@ -385,30 +475,62 @@ Dataset summary (computed from the exported files; `size` in bytes of scenes.jso
   "pp": [
    "None"
   ],
-  "size": 12835036
+  "size": 12854145
  }
 }
 ```
 
-Locations: CARLA `mining/results/carla/dataset/`; mock `results/mock/dataset/` (repo root, per the global constraint that mock outputs live under `results/mock`). Both are git-ignored: mock scenes.jsonl + traces.npz are about 12.8 MB, CARLA about 5.4 MB (over the roughly 5 MB limit for committing), so only the small md files are committed. Validator output: mock `454 records, 0 invalid`; CARLA `1352 records, 0 invalid` (run after the final export). Only the 36 CARLA infogap rows carry `history`; the 1316 corridor and rc03 rows predate history capture and have `history` null.
+Split groups (`mining/splits.py`; the controller ruling): corridor and rc03 rows are grouped by family plus every non-distance theta factor, so all gap neighbours of a scene share a group; infogap rows are grouped by speed bin (width 1.0 m/s), so every D and t_reveal at that speed stay together. A pair that varies a non-distance factor takes the group of its unrecoverable member for both members. `validate_dataset.py` checks across rows that rows with the same family and non-distance factors share a group, that every pair id has exactly one recoverable and one unrecoverable member in one group, and that each (backend, family) has one `policy_library_id` and one `policy_library_version`.
+
+Pairs: pair members are keyed by (scene id, pair id, role) and never dropped by deduplication; a plain scene with the same theta as a pair member is the row that is dropped (its source file stays listed). An earlier export keyed rows by scene id alone and left 8 of 31 CARLA pair ids with a single role; the corrected CARLA export has 37 pair ids (the pairs files; pairs.md lists 31 distinct ones) with 74 rows, all complete. The mock export has 10 pair ids and 20 rows.
+
+Library identity: `policy_library_id` is the family's library id from its plain records (corridor `corridor_v1`, rc03 `rc03_carla_lc2_full_alat8`, infogap `occ_lc2.0_al8lc2`; the mock corridor records carry none, so the mock id is the fallback `corridor_library`), also applied to pair rows. `policy_library_version` is a hash of the library definition (policy names, versions, terminal modes and non-theta parameters; the `@prefix` wrapper and theta-valued parameters such as prefix_s are not part of it), so it does not change with theta.
+
+Locations: CARLA `mining/results/carla/dataset/`; mock `results/mock/dataset/` (repo root, per the global constraint that mock outputs live under `results/mock`; the brief had named `mining/results/<backend>/dataset`). Both are git-ignored: mock scenes.jsonl + traces.npz are about 12.8 MB and CARLA about 5.4 MB, over the roughly 5 MB limit for committing, so only the small md files are committed. The mock `physics_profile` is null by design: the kinematic stand-in has no CARLA physics profile, and the validator requires null there and a `pp_` id on every CARLA row. Validator output after the fix round: mock `454 records, 0 invalid`; CARLA `1372 records, 0 invalid`. Only the 36 CARLA infogap rows carry `history`; the 1336 corridor and rc03 rows predate history capture and have `history` null (consistently, not an empty list).
 
 ## 7. Known issues, caveats and surprises
 
-**Repeatability.** The Task 5 D4 sigma (0.0167 margin units, from corridor and rc03 repeats) is superseded: the maximum observed CARLA repeat spread across all tasks is **0.028 margin units**, RC13 scene (v 14, D 20, t_reveal 0.2), witness world B ranging 0.0224 .. 0.0504 over four runs (`negatives.md`). It is about 1.7 times the Task 5 sigma. Cost if wrong: claims whose margin is below this spread may not be reproducible. Headline claims whose margin is below 0.028 (computed from the margins in the md files):
+**Repeatability.** RC13: 2 of 4 scenes keep every witness margin at or above the max observed spread 0.028 ((14.0, 19.0, 0.1), (18.0, 28.0, 0.2)); the scenes inside it are (14.0, 20.0, 0.2) (smallest margin 0.0224), (18.0, 26.0, 0.2) (smallest margin 0.0182). negatives.md calls all 4 'robust' only because it applied sigma = 0.0167; at 0.028 the robust count is 2 of 4.
 
-| headline claim | margin | below 0.028? | source |
+**Repeatability (spread).** The Task 5 D4 sigma (0.0167 margin units, from corridor and rc03 repeats) is superseded: the maximum observed CARLA repeat spread across all tasks is **0.028 margin units**, RC13 scene (v 14, D 20, t_reveal 0.2), witness world B ranging 0.0224 .. 0.0504 over four runs (`negatives.md`). It is about 1.7 times the Task 5 sigma. Cost if wrong: claims whose margin is below this spread may not be reproducible. Headline claims whose margin is below 0.028 (computed from the margins in the md files):
+
+| headline claim | margin | inside max observed spread (abs margin < 0.028)? | source |
 |---|---|---|---|
-| RC13 (v 18, D 26, t_reveal 0.2) witness margin | +0.018 | yes | negatives.md, Repeatability |
-| RC13 (v 14, D 20, t_reveal 0.2) witness world B, lowest repeat | +0.022 | yes | negatives.md, Repeatability (this scene IS the 0.028 spread: range 0.0224 .. 0.0504) |
-| RC09 open-left control | +0.022 | yes | negatives.md, Controls |
-| RC03 witness at v 18, gap 30 (bypass_left) | +0.008 | yes | core.md, RC03 (single gap window) |
-| D5 CARLA info-gap scene D 20.8, v 16, t_reveal 0.75: V_hind | +0.002 | yes | mining/infogap/infogap.md (hindsight witness margin; the label V_hind >= eps is not robust) |
-| Task 7 sweep v 14, D 18, t_reveal 0: R_REF with V = 0.025 | +0.025 | yes | occlusion.md, full margins |
-| Task 7 sweep v 18, D 26, t_reveal 0.2: R_REF with V = 0.018 | +0.018 | yes | occlusion.md, full margins |
-| Task 7 sweep v 18, D 30, t_reveal 0.8: R_REF with V = 0.009 | +0.009 | yes | occlusion.md, full margins |
-| Task 7 sweep v 14, D 19, t_reveal 0.2: U_INFORMATION with V = -0.002 (bracket edge of the transition) | -0.002 | yes | occlusion.md, full margins |
+| RC13 scene (14.0, 19.0, 0.1): smallest witness margin over repeats and worlds | +0.0490 | no | negatives.md, Repeatability |
+| RC13 scene (14.0, 20.0, 0.2): smallest witness margin over repeats and worlds | +0.0224 | **yes** | negatives.md, Repeatability |
+| RC13 scene (18.0, 26.0, 0.2): smallest witness margin over repeats and worlds | +0.0182 | **yes** | negatives.md, Repeatability |
+| RC13 scene (18.0, 28.0, 0.2): smallest witness margin over repeats and worlds | +0.1046 | no | negatives.md, Repeatability |
+| RC09 open-left control witness (bypass_left_lc2) | +0.0222 | **yes** | negatives.md, Controls |
+| RC03 witness at v 18, gap 30 (bypass_left) | +0.0080 | **yes** | core.md, RC03 chosen witnesses |
+| RC06 named witness wait_observe_enter (scene 60/20/16; the scene also has wait_brake_observe_enter at 0.105, so the label stands) | +0.0170 | **yes** | compositional.md, RC06 |
+| D5 CARLA info-gap scene D 26.8, v 17.1, t_reveal 0.7 (cem s1): V_hind (hindsight witness) | +0.1050 | no | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 26.8, v 17.1, t_reveal 0.7 (cem s1): V (negative side) | -0.0830 | no | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 30.6, v 17.9, t_reveal 1.1 (straddle s1): V_hind (hindsight witness) | +0.1360 | no | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 30.6, v 17.9, t_reveal 1.1 (straddle s1): V (negative side) | -0.0400 | no | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 22.6, v 16.1, t_reveal 0.55 (cem s1): V_hind (hindsight witness) | +0.0850 | no | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 23.9, v 17.2, t_reveal 1.05 (straddle s1): V_hind (hindsight witness) | +0.0630 | no | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 24.4, v 17.6, t_reveal 0.5 (straddle s1): V_hind (hindsight witness) | +0.0550 | no | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 20.8, v 16, t_reveal 0.75 (cem s1): V_hind (hindsight witness) | +0.0020 | **yes** | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 20.4, v 13.8, t_reveal 1.15 (straddle s0): V_hind (hindsight witness) | +0.0700 | no | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 20.4, v 13.8, t_reveal 1.15 (straddle s0): V (negative side) | +0.3060 | no | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 26.8, v 16.2, t_reveal 0.9 (straddle s1): V_hind (hindsight witness) | +0.1900 | no | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 26.8, v 16.2, t_reveal 0.9 (straddle s1): V (negative side) | +0.6780 | no | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 24.5, v 15.7, t_reveal 0.5 (cem s1): V_hind (hindsight witness) | +1.0500 | no | mining/infogap/infogap.md |
+| D5 CARLA info-gap scene D 24.5, v 15.7, t_reveal 0.5 (cem s1): V (negative side) | +0.4900 | no | mining/infogap/infogap.md |
+| Task 7 sweep v 14, D 18, t_reveal 0: R_REF, V | +0.0250 | **yes** | occlusion.md, full margins |
+| Task 7 sweep v 14, D 18, t_reveal 0.1: U_INFORMATION, V (transition bracket edge) | -0.0420 | no | occlusion.md, full margins |
+| Task 7 sweep v 14, D 19, t_reveal 0.1: R_REF, V | +0.0490 | no | occlusion.md, full margins |
+| Task 7 sweep v 14, D 19, t_reveal 0.2: U_INFORMATION, V (transition bracket edge) | -0.0020 | **yes** | occlusion.md, full margins |
+| Task 7 sweep v 14, D 20, t_reveal 0.2: R_REF, V | +0.0500 | no | occlusion.md, full margins |
+| Task 7 sweep v 14, D 20, t_reveal 0.3: R_REF, V | +0.0360 | no | occlusion.md, full margins |
+| Task 7 sweep v 14, D 20, t_reveal 0.5: U_INFORMATION, V (transition bracket edge) | -0.0300 | no | occlusion.md, full margins |
+| Task 7 sweep v 18, D 26, t_reveal 0.2: R_REF, V | +0.0180 | **yes** | occlusion.md, full margins |
+| Task 7 sweep v 18, D 28, t_reveal 0.4: R_REF, V | +0.0480 | no | occlusion.md, full margins |
+| Task 7 sweep v 18, D 30, t_reveal 0.8: R_REF, V | +0.0090 | **yes** | occlusion.md, full margins |
 
-CARLA is not bit-reproducible: a minority of repeated scenes (about 1 episode in 4 in the D4 repeats, 9 of 32 and 14 of 77 rows) show a changed value within a session (sigma 0.0833 m in the corridor units); same-server determinism cases were exact, and cross-session repeats were not measured systematically (the RC12 spread check of 10 scenes of one family is mostly saturated and proves nothing about cross-session spread).
+10 of the 31 listed margins are inside the spread. (Rows with margins up to twice the spread are listed so the reader can see how close the others are.)
+
+CARLA is not bit-reproducible: a minority of repeated scenes (23 of 109 repeated scenes (about 21%) showed spread in some repeat: 9 of 32 corridor and 14 of 77 rc03 rows) show a changed value within a session (sigma 0.0833 m in the corridor units); same-server determinism cases were exact, and cross-session repeats were not measured systematically (the RC12 spread check of 10 scenes of one family is mostly saturated and proves nothing about cross-session spread).
 
 **Plant.**
 - Moving actors start 3-5% below their declared speed (warm-up drag, pinned each warm-up tick); residual 2.5-5%; measured t0 speeds are in the md files. Declared actor speeds are nominal upper bounds. RC07 was re-run on the fixed plant (it first ran with the rear actor about 15% slow); its scene moved to rear_gap 100 and the earlier (34, 80, 18) scene no longer holds.
@@ -433,6 +555,13 @@ CARLA is not bit-reproducible: a minority of repeated scenes (about 1 episode in
 - Mixed server sessions: RC12 and RC19 from the earlier session; `Ctx.point` cache keys omit library id and `a_lat_max` (guarded by sweep-name tags); superseded files are excluded from validation by name only.
 - `core_before_rc07_rerun.md` is a verbatim copy of the pre-fix core report.
 - Minor open items: RC16 point-model column is constant True; `foundation.md` preamble still mentions an older bisection step; the RC18 refuted-by-comb column covers only the brake_steer policies; brake-onset smoothed a_long 8.79 vs decel target 6.19 is unexplained; Task 7 figure cosmetics; `negatives.md` prose "sigma is a conservative bound" is contradicted by the 0.028 spread (this report supersedes it).
+- Task 1 (deferred minors): `measure_brake` keeps an invalid-start fit when its retries run out (`bringup.py` lines 50-52); the extra-tick guard in `plant_carla.py` (line 306) mismatches and the non-monotone branch has no test; the steer response is nonlinear; `response_delay_s` only means 'at most one tick'.
+- Task 2 (deferred minors): the steer test is confounded by a 30-40% speed loss; tests are missing for the `hold_i` hand-off, `ScriptedActor` `ki` and the invalid-start None case; the scripted actor decel lags the nominal b under PI (a world-fidelity gap).
+- Task 3: the fix report did not paste the pytest output (the implementer stated 71 passed).
+- Task 5: the sigma loop has no explicit convergence assert; rc03 mining uses widened ranges (v up to 24, gap up to 60) and CARLA conventions (a_lat_max 8, lc_time 2.0), so the mock and CARLA rc03 tables are not comparable.
+- Task 6: the first assertion of the harness `vmin` test is vacuous (an `or`).
+- Task 7: the `history_check` threshold test only asserts the constant.
+- Task 8: the marginal-scene rule has a cost: with sigma 0.0167 the RC13 headline was 4 scenes; at the observed spread 0.028 it is 2 (section 7, Repeatability); `negatives.md` wording is loose or stale ('within about 10%', 'single runs' in Plant caveats, 'sigma is a conservative bound'), and its Reading paragraph omits the E9 result (the exact envelope held to the 1 m reserve disagrees with the evidence in 4 of 4 scenes).
 - Process notes: subagents ran on Sonnet 5.5 at medium effort; one controller-made doc fix (f644025) bypassed the implementer.
 - D5 CARLA used a small budget by design (about 36 scenes); it is not a mining comparison between cem and straddle.
 

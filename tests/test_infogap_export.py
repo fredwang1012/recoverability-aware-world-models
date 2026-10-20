@@ -11,6 +11,7 @@ import pytest
 import export as EX
 import infogap as IG
 import margin as M
+import splits as SP
 import validate_dataset as VD
 from families import INFOGAP, mock_ctx
 
@@ -163,7 +164,7 @@ def test_export_passes_validator_and_null_fields_consistent(tmp_path, mock_scene
         assert r["pair_id"] is None and r["pair_role"] is None and r["varied_factor"] is None
         assert r["parent_id"] is None and r["variant_kind"] is None
         assert set(EX.E1_FIELDS) <= set(r)
-        assert r["split_group"].startswith("infogap_D")
+        assert r["split_group"] == SP.split_group("infogap", r["theta"])
     # labels in the export are exactly the evidence class of the record
     assert {r["evidence"] for r in rows} == {"U_INFORMATION", "R_REF"}
 
@@ -172,7 +173,7 @@ def test_export_pairs_share_split_group_and_dedupe(tmp_path, mock_scenes):
     n, nh, rows, out = _export(tmp_path, mock_scenes, pairs=True)
     assert n == 2                                        # pair members replace the same-theta plain records
     assert {r["pair_role"] for r in rows} == {"unrecoverable", "recoverable"}
-    assert all(r["pair_id"] == r["split_group"] == "infogap_cem_s0_pair000" and r["varied_factor"] == "gap_m" for r in rows)
+    assert all(r["pair_id"] == "infogap_cem_s0_pair000" and r["varied_factor"] == "gap_m" for r in rows) and len({r["split_group"] for r in rows}) == 1
     assert all(VD.check(r, str(out)) == [] for r in rows)
     assert all(set(r["sources"]) == {"pairs_bisect_s0.jsonl", "records_cem_s0.jsonl"} for r in rows)
 
@@ -239,3 +240,123 @@ def test_run_one_uses_family_search_value(tmp_path):
     for r in recs:
         assert r["_Vsearch"] == pytest.approx(IG.cem_surrogate(r["R_norm"]))
         assert r["split_group"].startswith("infogap_D")
+
+
+# ----------------------------------------------------------------------------- fix round 1: split groups, half-pairs, library identity, required fields
+def _plain_and_pairs(tmp_path, mock_scenes, pair_specs, with_lib=True):
+    """infogap dir with the two mock scenes as plain records (library_id set like fam.meta() does) and the given pairs (list of (pair_id, unrec_idx, rec_idx));
+    pair members carry NO library_id (as in the real pairs_*.jsonl)."""
+    d = tmp_path / "mining" / "infogap"
+    d.mkdir(parents=True)
+    rows = []
+    for th, rec in mock_scenes:
+        j = rec.to_json()
+        j["_algo"], j["_seed"] = "cem", 0
+        if with_lib:
+            j["library_id"] = "occ_test_lib"
+        rows.append(j)
+    with open(d / "records_cem_s0.jsonl", "w") as f:
+        for j in rows:
+            f.write(json.dumps(j) + "\n")
+    with open(d / "pairs_bisect_s0.jsonl", "w") as f:
+        for pid, iu, ir in pair_specs:
+            a, b = copy.deepcopy(rows[iu]), copy.deepcopy(rows[ir])
+            for m in (a, b):
+                m.pop("library_id", None)
+                m["parent_family_id"] = pid
+            f.write(json.dumps({"pair_id": pid, "varied": "gap_m", "unrecoverable_side": a, "recoverable_side": b}) + "\n")
+    out = tmp_path / "ds"
+    EX.export_records(str(tmp_path / "mining"), str(out), "mock", families=("infogap",))
+    return [json.loads(line) for line in open(out / "scenes.jsonl")], out
+
+
+def test_two_pairs_sharing_a_theta_are_never_half_pairs(tmp_path, mock_scenes):
+    rows, out = _plain_and_pairs(tmp_path, mock_scenes, [("p0", 0, 1), ("p1", 0, 1)])
+    pair_rows = [r for r in rows if r["pair_id"]]
+    assert len(pair_rows) == 4 and len({r["id"] for r in rows}) == len(rows)
+    for pid in ("p0", "p1"):
+        assert sorted(r["pair_role"] for r in pair_rows if r["pair_id"] == pid) == ["recoverable", "unrecoverable"]
+    assert VD.check_dataset(rows) == [] and all(VD.check(r, str(out)) == [] for r in rows)
+    # the same theta used as BOTH roles of one pair (equal after quantisation) is still two rows
+    rows2, _ = _plain_and_pairs(tmp_path / "b", mock_scenes, [("q", 0, 0)])
+    assert sorted(r["pair_role"] for r in rows2 if r["pair_id"] == "q") == ["recoverable", "unrecoverable"]
+
+
+def test_validator_flags_half_pairs_and_split_violations(tmp_path, mock_scenes):
+    rows, _ = _plain_and_pairs(tmp_path, mock_scenes, [("p0", 0, 0)])        # scene 1 stays a plain row
+    half = [r for r in rows if not (r["pair_id"] and r["pair_role"] == "recoverable")]
+    assert any("exactly one recoverable and one unrecoverable" in e for e in VD.check_dataset(half))
+    bad = copy.deepcopy(rows)
+    next(r for r in bad if r["pair_id"] is None)["split_group"] = "somewhere_else"
+    assert any("split_group" in e for e in VD.check_dataset(bad))
+    bad = copy.deepcopy(rows)
+    for r in bad:
+        if r["pair_id"] and r["pair_role"] == "recoverable":
+            r["split_group"] = "other"
+    assert any("different split groups" in e for e in VD.check_dataset(bad))
+    a = copy.deepcopy(next(r for r in rows if r["pair_id"] is None))
+    b = copy.deepcopy(a)
+    a["id"], b["id"], b["split_group"] = "a", "b", "x"
+    assert any("same non-distance factors" in e for e in VD.check_dataset([a, b]))
+
+
+def test_split_group_rules():
+    base = {"gap_m": 10.0, "v_mps": 12.0, "tau_s": 0.1, "prefix_s": 0.2, "b_mps2": 6.19}
+    c1 = SP.split_group("corridor", base)
+    c2 = SP.split_group("corridor", dict(base, gap_m=33.0))
+    c3 = SP.split_group("corridor", dict(base, v_mps=12.5))
+    assert c1 == c2 != c3                                     # all gap neighbours together, other factors split
+    r = {"gap_m": 20.0, "v_mps": 18.0, "tau_s": 0.1, "b_mps2": 6.19}
+    assert SP.split_group("rc03", r) == SP.split_group("rc03", dict(r, gap_m=40.0)) and SP.split_group("rc03", r).startswith("rc03:")
+    i = {"gap_m": 20.0, "v_mps": 15.2, "t_reveal_s": 0.1}
+    assert SP.split_group("infogap", i) == SP.split_group("infogap", dict(i, gap_m=31.0, v_mps=15.9, t_reveal_s=1.1))
+    assert SP.split_group("infogap", i) != SP.split_group("infogap", dict(i, v_mps=16.0))
+
+
+def test_pair_varying_a_nondistance_factor_stays_together(tmp_path, mock_scenes):
+    """A pair that varies speed has members with different non-distance factors; both take the unrecoverable member's group."""
+    th0, rec0 = mock_scenes[0]
+    d = tmp_path / "mining" / "corridor"
+    d.mkdir(parents=True)
+    a, b = rec0.to_json(), copy.deepcopy(rec0.to_json())
+    for m, v in ((a, 12.0), (b, 12.4)):
+        m["family_id"] = m["split_group"] = "corridor"
+        m["theta"] = {**m["theta"], "v_mps": v, "prefix_s": 0.0}
+    with open(d / "pairs_bisect_s0.jsonl", "w") as f:
+        f.write(json.dumps({"pair_id": "cp", "varied": "v_mps", "unrecoverable_side": a, "recoverable_side": b}) + "\n")
+    EX.export_records(str(tmp_path / "mining"), str(tmp_path / "ds"), "mock", families=("corridor",))
+    rows = [json.loads(line) for line in open(tmp_path / "ds" / "scenes.jsonl")]
+    assert len(rows) == 2 and len({r["split_group"] for r in rows}) == 1
+    assert rows[0]["split_group"] == SP.split_group("corridor", a["theta"])
+    assert VD.check_dataset(rows) == []
+
+
+def test_library_identity_is_family_level(tmp_path, mock_scenes):
+    rows, _ = _plain_and_pairs(tmp_path, mock_scenes, [("p0", 0, 1)])
+    assert {(r["policy_library_id"], r["policy_library_version"]) for r in rows} == {("occ_test_lib", rows[0]["policy_library_version"])}
+    bad = copy.deepcopy(rows)
+    bad[0]["policy_library_version"] = "deadbeef"
+    assert any("library ids/versions" in e for e in VD.check_dataset(bad))
+    bad = copy.deepcopy(rows)
+    bad[0]["policy_library_id"] = "other"
+    assert any("library ids/versions" in e for e in VD.check_dataset(bad))
+
+
+def test_library_definition_drops_theta_valued_params_and_prefix_wrapper():
+    inner = {"name": "brake_hold", "version": "0.1", "params": {}, "terminal": "protected_hold"}
+    wrapped = {"name": "brake_hold@prefix", "version": "0.1", "params": {"prefix_s": 0.45}, "terminal": "protected_hold", "inner": inner}
+    th = {"gap_m": 1.0, "prefix_s": 0.45}
+    assert EX.library_definition([wrapped], th) == EX.library_definition([inner], {"gap_m": 1.0, "prefix_s": 0.0})
+    other = dict(inner, params={"lc_time": 2.0})
+    assert EX.library_definition([other], th) != EX.library_definition([inner], th)         # a real library parameter changes the version
+    assert EX.library_definition([dict(other, params={"lc_time": 2.0, "prefix_s": 9})], th) == EX.library_definition([other], th)
+
+
+def test_e1_fields_tied_to_required_and_every_required_field_is_checked(tmp_path, mock_scenes):
+    assert set(EX.E1_FIELDS) <= set(VD.E1_REQUIRED)
+    _, _, rows, out = _export(tmp_path, mock_scenes)
+    assert set(EX.E1_FIELDS) | set(EX.E1_EXTRA) == set(rows[0]) and set(VD.E1_REQUIRED) <= set(rows[0])
+    for k in VD.E1_REQUIRED:
+        z = copy.deepcopy(rows[0])
+        del z[k]
+        assert f"missing {k}" in VD.check(z, str(out)), k

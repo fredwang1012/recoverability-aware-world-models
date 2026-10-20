@@ -10,6 +10,7 @@ import sys
 import numpy as np
 
 import contract
+import splits
 
 REQUIRED = ["id", "source", "backend", "theta", "u", "seed", "world_set", "policy_library", "R", "V", "category",
             "evidence", "t_reveal", "margin_config", "descriptors", "pair_id", "pair_role", "varied_factor",
@@ -29,7 +30,7 @@ def finite(x):
 
 
 def check(rec, root):
-    if rec.get("schema_version") == "E1.1":
+    if rec.get("schema_version") == "E1.1" or "trace_key" in rec or "R_mask" in rec:
         return check_e1(rec, root)
     errs = [f"missing {k}" for k in REQUIRED if k not in rec]
     if errs:
@@ -162,8 +163,6 @@ def check_e1(rec, root):
     pf = [rec["pair_id"], rec["pair_role"], rec["varied_factor"]]
     if any(x is not None for x in pf) and (any(x is None for x in pf) or rec["pair_role"] not in ("unrecoverable", "recoverable")):
         errs.append("incomplete pair fields")
-    if rec["pair_id"] is not None and rec["split_group"] != rec["pair_id"]:
-        errs.append("pair member must share the pair split_group")
     if (rec["parent_id"] is None) != (rec["variant_kind"] is None):
         errs.append("parent_id and variant_kind must be both set or both null")
     # history: only delivered features, never world identity, per-world list in world_set order
@@ -205,13 +204,49 @@ def check_e1(rec, root):
     return errs
 
 
+def check_dataset(rows):
+    """Cross-row checks on E1.1 rows (returns a list of messages):
+    1. rows of one family with the same non-distance factors share a split_group (non-pair rows; also equal to splits.split_group);
+    2. every pair_id has exactly one recoverable and one unrecoverable member, both in the same split_group, which is the group of at least one member;
+    3. within (backend, family): one policy_library_id and one policy_library_version."""
+    errs, by_key, pairs, libs = [], {}, {}, {}
+    for r in rows:
+        if r.get("schema_version") != "E1.1":
+            continue
+        want = splits.split_group(r["family_id"], r["theta"])
+        if r["pair_id"] is None:
+            if r["split_group"] != want:
+                errs.append(f"{r['id']}: split_group {r['split_group']!r} != non-distance-factor group {want!r}")
+            by_key.setdefault((r["backend"], want), set()).add(r["split_group"])
+        else:
+            pairs.setdefault(r["pair_id"], []).append((r["pair_role"], r["split_group"], want))
+        libs.setdefault((r["backend"], r["family_id"]), set()).add((r["policy_library_id"], r["policy_library_version"]))
+    for k, g in by_key.items():
+        if len(g) > 1:
+            errs.append(f"rows with the same non-distance factors {k} are in several split groups {sorted(g)}")
+    for pid, ms in pairs.items():
+        roles = sorted(m[0] for m in ms)
+        if roles != ["recoverable", "unrecoverable"]:
+            errs.append(f"pair {pid}: members {roles}, need exactly one recoverable and one unrecoverable")
+            continue
+        if len({m[1] for m in ms}) != 1:
+            errs.append(f"pair {pid}: members are in different split groups")
+        elif ms[0][1] not in {m[2] for m in ms}:
+            errs.append(f"pair {pid}: split group {ms[0][1]!r} is not the non-distance-factor group of either member")
+    for k, v in libs.items():
+        if len({x[0] for x in v}) > 1 or len({x[1] for x in v}) > 1:
+            errs.append(f"{k}: several library ids/versions {sorted(v)}")
+    return errs
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("dataset", help="directory containing scenes.jsonl")
     a = ap.parse_args()
-    ids, bad, n = set(), 0, 0
+    ids, bad, n, rows = set(), 0, 0, []
     for line in open(f"{a.dataset}/scenes.jsonl"):
         rec = json.loads(line)
+        rows.append(rec)
         n += 1
         errs = check(rec, a.dataset)
         if rec.get("id") in ids:
@@ -220,6 +255,10 @@ def main():
         if errs:
             bad += 1
             print(rec.get("id"), errs)
+    cross = check_dataset(rows)
+    for e in cross:
+        print("dataset:", e)
+    bad += len(cross)
     print(f"{n} records, {bad} invalid")
     sys.exit(1 if bad else 0)
 

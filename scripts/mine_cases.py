@@ -189,6 +189,7 @@ def relabel_pairs(fam, algo, ctx, outdir, name, seed):
             rec.parent_family_id, rec.varied_factor, rec.split_group = pid, fam.names[p["varied_index"]], split
             rec.finalize(ctx["cfg"].eps)
             members[role] = rec.to_json()
+            members[role].update(fam.meta())                 # library_id etc., same as the plain scene records
         varied = fam.names[p["varied_index"]]
         umid = [float((a + b) / 2) for a, b in zip(p["u_unrecoverable"], p["u_recoverable"])]
         res.append({"pair_id": pid, "varied": varied, "u_mid": umid,

@@ -53,26 +53,84 @@ def evidence_mix_occ():
     return mix
 
 
+def rc13_rows():
+    """[(scene, min_margin_over_runs_and_worlds)] parsed from the Repeatability table of negatives.md."""
+    t = rd(CARLA, "negatives.md")
+    t = t[t.index("### Repeatability and headline"):]
+    out = []
+    for m in re.finditer(r"^\| (\([\d., ]+\)) \| \[.*?\] \| ([\d.]+) \.\. ([\d.]+) \| ([\d.]+) \.\. ([\d.]+) \| \w+ \|$", t, re.M):
+        out.append((m.group(1), min(float(m.group(2)), float(m.group(4)))))
+    return out
+
+
+def rc13_summary():
+    rows = rc13_rows()
+    robust = [n for n, m in rows if m >= MAX_SPREAD]
+    return (f"RC13: {len(robust)} of {len(rows)} scenes keep every witness margin at or above the max observed spread {MAX_SPREAD} "
+            f"({', '.join(robust) or 'none'}); the scenes inside it are "
+            f"{', '.join(f'{n} (smallest margin {m:.4f})' for n, m in rows if m < MAX_SPREAD) or 'none'}. negatives.md calls all {len(rows)} 'robust' only "
+            f"because it applied sigma = 0.0167; at {MAX_SPREAD} the robust count is {len(robust)} of {len(rows)}.")
+
+
+def flag_rows():
+    rows = []
+    for n, m in rc13_rows():
+        rows.append((f"RC13 scene {n}: smallest witness margin over repeats and worlds", m, "negatives.md, Repeatability"))
+    t = rd(CARLA, "negatives.md")
+    m = re.search(r"Open-left control, repeatability.*?range ([\d.]+) \.\. ([\d.]+)", t, re.S)
+    rows.append(("RC09 open-left control witness (bypass_left_lc2)", float(m.group(1)), "negatives.md, Controls"))
+    c = rd(CARLA, "core.md")
+    m = re.search(r"^\| 18 \| 2 \| 30 \| -inf \| bypass_left ([\d.]+) ", c, re.M)
+    rows.append(("RC03 witness at v 18, gap 30 (bypass_left)", float(m.group(1)), "core.md, RC03 chosen witnesses"))
+    k = rd(CARLA, "compositional.md")
+    m = re.search(r"^\| 60 \| 20 \| 16 \| R_REF \| True \| immediate_entry=-inf; wait_observe_enter=([\d.]+);", k, re.M)
+    rows.append(("RC06 named witness wait_observe_enter (scene 60/20/16; the scene also has wait_brake_observe_enter at 0.105, so the label stands)", float(m.group(1)), "compositional.md, RC06"))
+    ig = rd(CARLA, "mining", "infogap", "infogap.md")
+    ig = ig[ig.index("### Found info-gap scenes"):]
+    for m in re.finditer(r"^\| (cem|straddle) \| (\d+) \| ([\d.]+) \| ([\d.]+) \| ([\d.]+) \| (-inf|-?[\d.]+) \| (-?[\d.]+) \|", ig, re.M):
+        algo, seed, D, v, tr, V, Vh = m.groups()
+        rows.append((f"D5 CARLA info-gap scene D {D}, v {v}, t_reveal {tr} ({algo} s{seed}): V_hind (hindsight witness)", float(Vh), "mining/infogap/infogap.md"))
+        if V != "-inf":
+            rows.append((f"D5 CARLA info-gap scene D {D}, v {v}, t_reveal {tr} ({algo} s{seed}): V (negative side)", float(V), "mining/infogap/infogap.md"))
+    for v, D, t_, ev, pol in occ_rows():
+        V = occ_v(pol)
+        if ev == "R_REF" and 0 <= V < 2 * MAX_SPREAD:
+            rows.append((f"Task 7 sweep v {v}, D {D}, t_reveal {t_:g}: R_REF, V", V, "occlusion.md, full margins"))
+        elif ev != "R_REF" and -2 * MAX_SPREAD < V < 0:
+            rows.append((f"Task 7 sweep v {v}, D {D}, t_reveal {t_:g}: {ev}, V (transition bracket edge)", V, "occlusion.md, full margins"))
+    return rows
+
+
 def flags_table():
-    rows = [("RC13 (v 18, D 26, t_reveal 0.2) witness margin", 0.0182, "negatives.md, Repeatability"),
-            ("RC13 (v 14, D 20, t_reveal 0.2) witness world B, lowest repeat", 0.0224, "negatives.md, Repeatability (this scene IS the 0.028 spread: range 0.0224 .. 0.0504)"),
-            ("RC09 open-left control", 0.022, "negatives.md, Controls"),
-            ("RC03 witness at v 18, gap 30 (bypass_left)", 0.008, "core.md, RC03 (single gap window)"),
-            ("D5 CARLA info-gap scene D 20.8, v 16, t_reveal 0.75: V_hind", 0.002, "mining/infogap/infogap.md (hindsight witness margin; the label V_hind >= eps is not robust)")]
-    for v, D, t, ev, pol in occ_rows():
-        V = occ_v(pol)
-        if ev == "R_REF" and 0 <= V < MAX_SPREAD:
-            rows.append((f"Task 7 sweep v {v}, D {D}, t_reveal {t:g}: R_REF with V = {V:.3f}", V, "occlusion.md, full margins"))
-    flips = []
-    for v, D, t, ev, pol in occ_rows():
-        V = occ_v(pol)
-        if ev != "R_REF" and -MAX_SPREAD < V < 0 and V != float("-inf"):
-            flips.append((f"Task 7 sweep v {v}, D {D}, t_reveal {t:g}: {ev} with V = {V:.3f} (bracket edge of the transition)", V, "occlusion.md, full margins"))
-    rows += flips
-    L = ["| headline claim | margin | below 0.028? | source |", "|---|---|---|---|"]
+    rows = flag_rows()
+    L = ["| headline claim | margin | inside max observed spread (abs margin < 0.028)? | source |", "|---|---|---|---|"]
     for name, m, src in rows:
-        L.append(f"| {name} | {m:+.3f} | {'yes' if abs(m) < MAX_SPREAD else 'no'} | {src} |")
-    return "\n".join(L)
+        L.append(f"| {name} | {m:+.4f} | {'**yes**' if abs(m) < MAX_SPREAD else 'no'} | {src} |")
+    n = sum(abs(m) < MAX_SPREAD for _, m, _ in rows)
+    return "\n".join(L) + f"\n\n{n} of the {len(rows)} listed margins are inside the spread. (Rows with margins up to twice the spread are listed so the reader can see how close the others are.)"
+
+
+def pairs_table():
+    """Representative matched pairs per family from pairs.md: first, middle and last distinct rows (one per varied factor where possible)."""
+    out = []
+    for fam in ("corridor", "rc03"):
+        t = rd(CARLA, "mining", fam, "pairs.md")
+        rows = [ln for ln in t.splitlines() if ln.startswith("| " + fam + "_bisect_s")]
+        seen, pick = set(), []
+        for ln in rows:
+            cells = [c.strip() for c in ln.strip("|").split("|")]
+            m = re.match(r"same scene except (\w+) ", cells[1])
+            key = m.group(1) if m else cells[1]
+            if key not in seen and cells[4] == "True":
+                seen.add(key)
+                pick.append(cells)
+        out.append(f"**{fam}**: {len(rows)} pair rows in `mining/{fam}/pairs.md`; representative pairs (first verified pair for each varied factor):\n")
+        out.append("| pair | description (same scene except ...) | unrecoverable side | recoverable side | verified |")
+        out.append("|---|---|---|---|---|")
+        for c in pick:
+            out.append(f"| {c[0]} | {c[1]} | {c[2]} | {c[3]} | {c[4]} |")
+        out.append("")
+    return "\n".join(out)
 
 
 def transitions_table():
@@ -85,6 +143,14 @@ def transitions_table():
         s = "".join({"R_REF": "R", "U_INFORMATION": "I", "U_LIBRARY": "L"}.get(e, "?") for _, e in sorted(by[k]))
         L.append(f"| {k[0]} | {k[1]} | {s} |")
     return "\n".join(L)
+
+
+def _roles(rows):
+    out = {}
+    for r in rows:
+        if r["pair_id"]:
+            out.setdefault(r["pair_id"], []).append(r["pair_role"])
+    return out
 
 
 def main():
@@ -108,7 +174,8 @@ def main():
     ds = {}
     for b, p in (("carla", os.path.join(CARLA, "dataset", "scenes.jsonl")), ("mock", os.path.join(MOCK, "dataset", "scenes.jsonl"))):
         rows = [json.loads(l) for l in open(p)]
-        ds[b] = {"n": len(rows), "hist": sum(r["history"] is not None for r in rows), "pairs": sum(r["pair_id"] is not None for r in rows),
+        ds[b] = {"n": len(rows), "hist": sum(r["history"] is not None for r in rows), "pair_rows": sum(r["pair_id"] is not None for r in rows), "pair_ids": len({r["pair_id"] for r in rows if r["pair_id"]}),
+                 "pair_ids_complete": sum(sorted(x) == ["recoverable", "unrecoverable"] for x in _roles(rows).values()),
                  "fam": {f: sum(r["family_id"] == f for r in rows) for f in sorted({r["family_id"] for r in rows})},
                  "ev": {e: sum(r["evidence"] == e for r in rows) for e in sorted({r["evidence"] for r in rows})},
                  "pp": sorted({str(r["physics_profile"]) for r in rows}), "size": os.path.getsize(p) + os.path.getsize(os.path.join(os.path.dirname(p), "traces.npz"))}
@@ -119,7 +186,8 @@ def main():
         "SELFTEST": selft, "CALIB": calib, "DETERMINISM": det, "TIMING": tim, "ANCHORS": anchors,
         "CORR_TAB": ctab, "RC03_TAB": rtab, "CORR_MIX": cmix, "RC03_MIX": rmix,
         "TRANSITIONS": transitions_table(), "OCC_MIX": ", ".join(f"{k} = {v}" for k, v in sorted(evidence_mix_occ().items())),
-        "FLAGS": flags_table(), "IG_CARLA": ig_c.replace("## D5", "### D5", 1), "IG_MOCK": ig_m.replace("## D5", "### D5", 1),
+        "FLAGS": flags_table(), "RC13_SUMMARY": rc13_summary(), "PAIRS": pairs_table(),
+        "SIGMA028": rd(CARLA, "mining", "sigma028.md").split("\n", 2)[2].replace("### ", "#### "), "IG_CARLA": ig_c.replace("## D5", "### D5", 1), "IG_MOCK": ig_m.replace("## D5", "### D5", 1),
         "DS": json.dumps(ds, indent=1), "D5_READING": rd(ROOT, "docs", "carla_results_d5_reading.md").strip(), "MAX_SPREAD": f"{MAX_SPREAD}",
     }
     for k, v in sub.items():

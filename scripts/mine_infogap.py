@@ -95,13 +95,36 @@ def report(rows, args, ctx, budget, wall):
     L.append(f"\nComparison with the Task 7 transition: {len(ig_all)} info-gap scene(s); {len(inside)} lie below the analytic common-stop distance "
              f"(a necessary condition); {len(early)} have t_reveal earlier than the analytic t* (Task 7 measured the threshold 0.05 to 0.22 s AFTER t*, "
              f"so t_reveal slightly below t* is not by itself a contradiction).")
+    L.append("Both are necessary conditions only: they do not predict a hit. The converse is checked below: R_REF scenes AFTER t* and below D_stop would be "
+             "counter-examples to 'late reveal below the stopping distance gives an info gap'; those within 0.2 m of D_stop are the expected edge cases "
+             "(the analytic D_stop uses b_cal and tau_eff, which carry the plant noise).")
+    late = sorted((r for r in rows if r["evidence"] == "R_REF" and r["t_star_analytic"] is not None and r["t_reveal_s"] > r["t_star_analytic"]
+                   and r["gap_m"] < r["stop_dist_m"]), key=lambda r: r["stop_dist_m"] - r["gap_m"])
+    L += ["\n### R_REF scenes after t* and below D_stop\n", "| algo | seed | D (m) | v (m/s) | t_reveal (s) | t* (s) | D_stop - D (m) | V | within 0.2 m of D_stop |", "|---|---|---|---|---|---|---|---|---|"]
+    for r in late:
+        L.append(f"| {r['algo']} | {r['seed']} | {r['gap_m']:g} | {r['v_mps']:g} | {r['t_reveal_s']:g} | {fnum(r['t_star_analytic'])} | {r['stop_dist_m'] - r['gap_m']:.2f} | {fnum(r['V'])} | "
+                 f"{'yes' if r['stop_dist_m'] - r['gap_m'] <= 0.2 else 'no'} |")
+    if not late:
+        L.append("| (none) | | | | | | | | |")
     nonig = [r for r in rows if not r["is_info_gap"] and r["evidence"] == "U_INFORMATION"]
     L.append(f"Scenes labelled U_INFORMATION that are not info-gap by the objective: {len(nonig)} (must be 0; U_INFORMATION implies V_hind >= eps and V < eps).")
     return "\n".join(L) + "\n"
 
 
+def rows_from_records(outdir, algos, seeds, budget, eps):
+    """Rebuild the scene rows from the checkpointed records (first `budget` per file), no simulator."""
+    import json
+    rows = []
+    for a in algos:
+        for sd in range(seeds):
+            with open(f"{outdir}/records_{a}_s{sd}.jsonl") as f:
+                rows += [scene_row(json.loads(line), eps) for line in list(f)[:budget]]
+    return rows
+
+
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--from-records", action="store_true", help="regenerate the md from the checkpointed records; no simulator, no new runs")
     ap.add_argument("--backend", choices=["mock", "carla"], default="mock")
     ap.add_argument("--algos", default="cem,straddle")
     ap.add_argument("--budget", type=int, default=9)
@@ -111,13 +134,15 @@ def main():
     ap.add_argument("--port", type=int, default=2000)
     ap.add_argument("--town", default="custom_straight")
     args = ap.parse_args()
-    ctx = MC.make_ctx(args)
+    ctx = {"backend": args.backend, "cfg": MC.M.DEFAULT_V2} if args.from_records else MC.make_ctx(args)
     outdir = f"results/{args.backend}/mining/infogap"
     os.makedirs(outdir, exist_ok=True)
     eps = ctx["cfg"].eps
     t0, rows = time.time(), []
     try:
-        for a in args.algos.split(","):
+        if args.from_records:
+            rows = rows_from_records(outdir, args.algos.split(","), args.seeds, args.budget, eps)
+        for a in ([] if args.from_records else args.algos.split(",")):
             for s in range(args.seeds):
                 if args.backend == "carla":
                     import carla_compositional as CCP
