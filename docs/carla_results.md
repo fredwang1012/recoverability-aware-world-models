@@ -447,35 +447,38 @@ Dataset summary (computed from the exported files; `size` in bytes of scenes.jso
 ```
 {
  "carla": {
-  "n": 1372,
+  "n": 2318,
   "hist": 36,
   "groups_natural": {
-   "corridor": 613,
+   "corridor": 715,
    "infogap": 7,
-   "rc03": 571
+   "rc03": 662,
+   "rc07": 678
   },
   "groups_after_merge": {
-   "corridor": 606,
+   "corridor": 708,
    "infogap": 7,
-   "rc03": 563
+   "rc03": 654,
+   "rc07": 673
   },
-  "pair_rows": 74,
-  "pair_ids": 37,
-  "pair_ids_complete": 37,
+  "pair_rows": 106,
+  "pair_ids": 53,
+  "pair_ids_complete": 53,
   "fam": {
-   "corridor": 680,
+   "corridor": 782,
    "infogap": 36,
-   "rc03": 656
+   "rc03": 750,
+   "rc07": 750
   },
   "ev": {
-   "R_REF": 561,
+   "R_REF": 1185,
    "U_INFORMATION": 6,
-   "U_LIBRARY": 805
+   "U_LIBRARY": 1127
   },
   "pp": [
    "pp_381b4c6e55"
   ],
-  "size": 5565659
+  "size": 7738274
  },
  "mock": {
   "n": 422,

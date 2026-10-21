@@ -159,6 +159,8 @@ The normalisation constants cannot change a label, while the 1 m clearance reser
 
 These rates overstate the sensitivity of a typical scene: mining and the case sweeps put most records near the boundary on purpose. 24 RC03 records were left out because two library moves share a name. Horizon, hold time, post-manoeuvre time and stop speed change the rollout itself, so they need new CARLA runs and were not tested.
 
+**Dataset.** The CARLA E1 export (`mining/export.py records --backend carla`) now holds 2,318 labelled scenes: corridor 782, RC03 750, RC07 750 and info-gap 36 (1,185 R_REF, 1,127 U_LIBRARY, 6 U_INFORMATION), 0 invalid, 2,042 split groups. This is in addition to the 20 hand-built case scenes. It is git-ignored; rebuild it from the mining records.
+
 ## Time-step sensitivity
 
 Margins that do not end in a stop are stable to the step size, but every braking-to-stop result depends on the 0.05 s step. The headline scenes were re-run at 0.025 s in the same server session (`mining/results/carla/dt_check.md`; RC18 left out, because its brake-steer limit smooths over a fixed number of ticks).

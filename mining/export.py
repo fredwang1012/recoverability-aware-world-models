@@ -7,7 +7,7 @@ variant_kind='appearance' and inherit theta and R unchanged.
 
 Usage:  python export.py --run ../results/mock_run --algos sobol,straddle,bisect --out ../results/dataset
 
-E1 export of physical-case ExecutionRecords (schema "E1.1": corridor / rc03 / infogap mining records, mock or CARLA, never mixed):
+E1 export of physical-case ExecutionRecords (schema "E1.1": corridor / rc03 / rc07 / infogap mining records, mock or CARLA, never mixed):
     python mining/export.py records --backend mock                      (repo root; writes results/mock/dataset)
     cd mining && python export.py records --backend carla              (writes results/carla/dataset)
 """
@@ -140,7 +140,7 @@ E1_EXTRA = ["schema_version", "backend", "evidence_scope", "seed", "policy_libra
             "margin_config_id", "sources", "trace_path", "trace_key", "code_version", "record_checksum", "invalid_reasons"]
 HIST_KEYS = {"t_capture", "t_available", "v", "lane_w", "ego_hl", "objs"}
 OBJ_KEYS = {"dx", "dlat", "dv", "hl", "hw"}
-SOURCE_FAMILIES = ("corridor", "rc03", "infogap")
+SOURCE_FAMILIES = ("corridor", "rc03", "rc07", "infogap")
 
 
 def _num(x):

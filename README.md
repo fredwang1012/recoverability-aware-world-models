@@ -10,9 +10,13 @@ CSC2626 project. A driving scene is **recoverable** when some move in a stated l
 
 - All 20 cases (RC01–RC20) are built and labelled on CARLA 0.9.16; 19 show their intended mechanism, and RC04 has no positive example.
 - Boundary mining (sobol, straddle, bisect, cem, bo_lcb, qd_fail, qd_boundary) ran on the corridor, RC03 and RC07 families: 51 matched pairs. Information-gap mining ran on RC10/RC11: 6 info-gap scenes.
-- Dataset export (E1) validates on both the mock and CARLA data, and G sensitivity is re-scored on 2,230 CARLA records. 36 case videos are recorded.
+- Dataset export (E1) validates on both the mock and CARLA data: the CARLA dataset has 2,318 labelled scenes (1,185 R_REF, 1,127 U_LIBRARY, 6 U_INFORMATION) from corridor, RC03, RC07 and info-gap mining, 0 invalid. G sensitivity is re-scored on 2,230 CARLA records.
 - Braking-to-stop boundaries depend on the 0.05 s step (checked at 0.025 s); other margins do not.
 - Open: braking at a finer step, the two-server determinism check, Cosmos appearance variants. See [the report](docs/REPORT.md#not-done-and-open-issues).
+
+## Videos
+
+36 clips (about 10 s each) show every case's headline scene, with the working move and the failing move side by side where a case has both. They are re-runs on CARLA with a chase camera and are a visual aid only; labels never come from them. The generated road has no scenery, so the look is composited: blue ego, red parked cars, orange moving cars, grass and asphalt painted in afterwards. In the hidden-car cases (RC10, RC11, RC13, RC14) nothing physical hides the car; it is drawn as a faint ghost marked "not visible to ego" until its reveal time. Each run stops at first contact and the clip freezes on a CONTACT banner. The clips are git-ignored (23 MB); the index with the outcome check is [`mining/results/carla/videos/index.md`](mining/results/carla/videos/index.md), and `scripts/carla_videos.py` rebuilds them (see [the setup guide](docs/CARLA_SETUP.md#run)).
 
 ## Layout
 
