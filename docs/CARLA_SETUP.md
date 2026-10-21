@@ -82,6 +82,6 @@ Summary of [`process/carla_best_practices_research.md`](process/carla_best_pract
 | Report a noise band rather than trusting single margins | Yes: 0.028 within a session and 0.196 across sessions, flagged in `carla_results.md` |
 | Rendering does not change physics | Partly checked: the 36 video re-runs (rendering on, a new session) reproduced the stored margins to 3 decimals |
 | Repeat determinism across servers or hardware | Not tested: one server fits in 6 GB |
-| Smaller time step (0.025 s) as a sensitivity check | Not done |
+| Smaller time step (0.025 s) as a sensitivity check | Done (`mining/results/carla/dt_check.md`): non-braking margins move by at most 0.028, but braking to a stop is weaker at 0.025 s (no end-of-stop snap), so 6 stop-and-hold margins flip. Braking boundaries are specific to the 0.05 s step |
 
 The camera deadlock (an RPC issued before the image of the last tick is drained) is not documented upstream; it was reproduced here on 0.9.16.

@@ -40,9 +40,9 @@ PASS = criterion met as stated; WARN = met with a caveat listed in section 7; NO
 | 4 | RC07 premature hand-back | WARN | `core.md` (re-run on fixed plant); contrast only at rear_gap 100 (selected gap 34, rear_gap 100, rear_v 18) |
 | 4 | RC12, RC19, RC20 | WARN | `core.md`; RC12 and RC19 from the pre-restart session |
 | 5 | corridor and rc03 mining (sobol, straddle, bisect, cem, bo_lcb), matched pairs, D4 repeats | WARN | `mining/corridor`, `mining/rc03`, `mining/repeat_spread.md`; sigma superseded (section 7) |
-| 5 | RC07 mining family | NOT EXECUTED | optional in Task 5, skipped |
-| 5 | qd_fail and qd_boundary on CARLA | NOT EXECUTED | not run on CARLA (exist in `algos.REGISTRY`, mock only) |
-| 5 | G sensitivity on CARLA | NOT EXECUTED | only the mock files `results/g_sensitivity*.md` exist; no CARLA G-sensitivity file was produced |
+| 5 | RC07 mining family | WARN | run after the main tasks (`mining/rc07/summary.md`, family `families.Rc07Carla`, same library and limit as the RC07 case): 14 distinct verified pairs; every scene has \|V\| < 0.3, so the near-boundary column carries no information for this family |
+| 5 | qd_fail and qd_boundary on CARLA | PASS | run after the main tasks on corridor, rc03 and rc07 (2 seeds x 40 scenes); rows in each family's `summary.md` |
+| 5 | G sensitivity on CARLA | WARN | `mining/results/carla/g_sensitivity.md`: 2,230 stored records re-scored (no new runs); q_* change no label, reserve_m x0.5/x1.5 changes 193/227, eps +/-0.05 changes 116/127; timing constants (horizon, hold) not testable from records |
 | 6 | RC05, RC06, RC08, RC15, RC18 | WARN | `compositional.md`; moving actors start 3.2-5.3% low (compositional.md); RC18 limits declared, a_comb mask |
 | 6 | RC04 | WARN | no CARLA positive witness after 92 scanned scenes (reported, not forced) |
 | 7 | RC10, RC11, RC14 and the reveal-time transition | WARN | `occlusion.md`, `occlusion_transition.png`; the transition is shown, but the 0.25 s cross-check tolerance cannot be verified as pre-declared (single commit) and the analytic t* lies before the measured bracket in 4 of 6 scenes (a one-sided conservative bound, +0.05..+0.22 s), so the cross-check is weaker than a match |
@@ -142,7 +142,9 @@ Other anchors: RC12 upper feasible prefix minus analytic T_p* = +0.016 s (`core.
 
 ### 3.4 G sensitivity
 
-Mock only (`results/g_sensitivity.md`, `results/g_sensitivity_v2.md`, untracked local files). No CARLA G sensitivity was produced (NOT EXECUTED).
+CARLA: `mining/results/carla/g_sensitivity.md` (stored records re-scored; method in `scripts/g_sensitivity_carla.py`). Mock: `results/g_sensitivity.md`, `results/g_sensitivity_v2.md` (untracked local files).
+
+**Time step.** `mining/results/carla/dt_check.md` re-ran the headline scenes at 0.025 s in the same session: margins that do not end in a stop moved by at most 0.028 (median 0.003), but every stop-and-hold move that passed at 0.05 s with a small margin failed at 0.025 s (6 margins, 2 class changes: RC01 at gap 16 and RC17 at delay 0.40). Cause: at 0.05 s the last 6 m/s of braking ends in a 23-33 m/s^2 snap to rest (see the calibration bands), which is absent at 0.025 s (about 4 m/s^2). Braking boundaries are therefore specific to the 0.05 s step; the calibrated b_cal includes the snap.
 
 ### 3.5 Per-family mining
 
@@ -155,6 +157,8 @@ CARLA, 2 seeds, 100 scenes per sobol/straddle/bisect run and 40 for cem/bo_lcb (
 | bisect | 100.00 +/- 0.00 | 55.50 +/- 12.74 | 44.50 +/- 12.74 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 75.00 +/- 1.96 | 0.45 +/- 0.11 | 0.86 +/- 0.06 | 7.50 +/- 0.98 | 7.50 +/- 0.98 | 7.50 +/- 0.98 | 0.97 +/- 0.31 | -0.97 +/- 0.31 |
 | bo_lcb | 40.00 +/- 0.00 | 32.50 +/- 0.98 | 7.50 +/- 0.98 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 33.50 +/- 2.94 | 7.64 +/- 3.15 | 0.97 +/- 0.00 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | n/a | n/a |
 | cem | 40.00 +/- 0.00 | 32.50 +/- 2.94 | 7.50 +/- 2.94 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 33.00 +/- 1.96 | 6.56 +/- 5.27 | 0.99 +/- 0.02 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | n/a | n/a |
+| qd_boundary | 40.00 +/- 0.00 | 21.50 +/- 4.90 | 18.50 +/- 4.90 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 22.50 +/- 2.94 | 9.11 +/- 0.72 | 0.99 +/- 0.02 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | n/a | n/a |
+| qd_fail | 40.00 +/- 0.00 | 23.00 +/- 3.92 | 17.00 +/- 3.92 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 23.50 +/- 2.94 | 10.06 +/- 0.50 | 0.99 +/- 0.02 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | n/a | n/a |
 | sobol | 100.00 +/- 0.00 | 48.50 +/- 0.98 | 51.50 +/- 0.98 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 51.50 +/- 0.98 | 2.17 +/- 0.28 | 0.97 +/- 0.01 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | n/a | n/a |
 | straddle | 100.00 +/- 0.00 | 71.50 +/- 0.98 | 28.50 +/- 0.98 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 85.50 +/- 6.86 | 0.64 +/- 0.30 | 0.92 +/- 0.00 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | n/a | n/a |
 
@@ -165,6 +169,8 @@ CARLA, 2 seeds, 100 scenes per sobol/straddle/bisect run and 40 for cem/bo_lcb (
 | bisect | 100.00 +/- 0.00 | 39.00 +/- 5.88 | 61.00 +/- 5.88 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 72.00 +/- 7.84 | n/a | n/a | 11.00 +/- 0.00 | 8.00 +/- 0.00 | 11.00 +/- 0.00 | n/a | n/a |
 | bo_lcb | 40.00 +/- 0.00 | 33.50 +/- 0.98 | 6.50 +/- 0.98 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 34.00 +/- 0.00 | n/a | n/a | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | n/a | n/a |
 | cem | 40.00 +/- 0.00 | 30.50 +/- 8.82 | 9.50 +/- 8.82 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 32.50 +/- 6.86 | n/a | n/a | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | n/a | n/a |
+| qd_boundary | 40.00 +/- 0.00 | 11.50 +/- 2.94 | 28.50 +/- 2.94 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 13.50 +/- 0.98 | n/a | n/a | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | n/a | n/a |
+| qd_fail | 40.00 +/- 0.00 | 12.00 +/- 1.96 | 28.00 +/- 1.96 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 14.00 +/- 0.00 | n/a | n/a | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | n/a | n/a |
 | sobol | 100.00 +/- 0.00 | 29.50 +/- 0.98 | 70.50 +/- 0.98 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 36.50 +/- 2.94 | n/a | n/a | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | n/a | n/a |
 | straddle | 100.00 +/- 0.00 | 67.50 +/- 4.90 | 32.50 +/- 4.90 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 89.50 +/- 0.98 | n/a | n/a | 0.00 +/- 0.00 | 0.00 +/- 0.00 | 0.00 +/- 0.00 | n/a | n/a |
 
@@ -222,6 +228,8 @@ Mining scenes (all algorithms, 2 seeds):
 | bisect | 89 | 111 |
 | cem | 15 | 65 |
 | bo_lcb | 15 | 65 |
+| qd_fail | 34 | 46 |
+| qd_boundary | 37 | 43 |
 
 **rc03**
 
@@ -234,6 +242,8 @@ Mining scenes (all algorithms, 2 seeds):
 | bisect | 122 | 78 |
 | cem | 19 | 61 |
 | bo_lcb | 13 | 67 |
+| qd_fail | 56 | 24 |
+| qd_boundary | 57 | 23 |
 
 Task 7 reveal sweep (`occlusion.md`, reveal-sweep scenes only, RC14 excluded): R_REF = 36, U_INFORMATION = 43, U_LIBRARY = 3. D5 mixes are in section 5.
 

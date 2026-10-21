@@ -5,7 +5,7 @@ As of 2026-10-20 · Frederick Wang (Approach 1)
 > Live version: [Claude Doc](https://claude.ai/artifact/FqWMCYVENDUFkjkbAVpykJ) (anyone with the link can open it).
 > This file is a snapshot of it. The generated numbers report is [`carla_results.md`](carla_results.md).
 
-All 20 recoverability cases from the PDF were built and labelled on CARLA 0.9.16. Every label comes from executed evidence, never set by hand. 19 cases show their intended mechanism; RC04 has no positive example on CARLA. Boundary mining ran on two case families and information-gap mining on one.
+All 20 recoverability cases from the PDF were built and labelled on CARLA 0.9.16. Every label comes from executed evidence, never set by hand. 19 cases show their intended mechanism; RC04 has no positive example on CARLA. Boundary mining ran on three case families (corridor, RC03, RC07) with seven algorithms, and information-gap mining on one. Braking-to-stop boundaries are specific to the 0.05 s simulation step (see Time-step sensitivity).
 
 ## Contents
 
@@ -16,11 +16,12 @@ All 20 recoverability cases from the PDF were built and labelled on CARLA 0.9.16
 5. [Where we differ from the PDF](#where-we-differ-from-the-pdf)
 6. [Boundary and info-gap mining](#boundary-and-info-gap-mining)
 7. [G sensitivity on CARLA](#g-sensitivity-on-carla)
-8. [Decisions](#decisions)
-9. [Problems and fixes](#problems-and-fixes)
-10. [Videos](#videos)
-11. [Not done and open issues](#not-done-and-open-issues)
-12. [Sources](#sources)
+8. [Time-step sensitivity](#time-step-sensitivity)
+9. [Decisions](#decisions)
+10. [Problems and fixes](#problems-and-fixes)
+11. [Videos](#videos)
+12. [Not done and open issues](#not-done-and-open-issues)
+13. [Sources](#sources)
 
 ## From the PDF to code
 
@@ -56,7 +57,7 @@ Every case runs on one CARLA 0.9.16 server on a laptop with a 6 GB RTX 3060, in 
 | Declared limits | Sideways a_lat_max = 8 m/s² in the two-lane cases; RC18 adds a combined brake-plus-steer limit a_comb_max = 8 m/s², applied only while the smoothing window is above 5 m/s |
 | Observation | The ego sees a 20 Hz feed of actor states. Partial-observation worlds withhold an actor until its reveal time (or after its forget time); nothing physical hides it |
 
-**Known plant caveats.** Moving actors start 3.2–5.3% below their declared speed, from warm-up drag; measured speeds are reported. CARLA is not deterministic: repeats of one scene in one server session differ by up to 0.028 in G, and the same scene across server sessions has shifted by up to 0.196, enough to flip one move from pass to fail.
+**Known plant caveats.** Moving actors start 3.2–5.3% below their declared speed, from warm-up drag; measured speeds are reported. CARLA is not deterministic: repeats of one scene in one server session differ by up to 0.028 in G, and the same scene across server sessions has shifted by up to 0.196, enough to flip one move from pass to fail. Braking to a stop also depends on the step size: the 0.05 s step ends braking with an artificial snap to rest (Time-step sensitivity).
 
 ## Results by case
 
@@ -96,12 +97,18 @@ The definitions and the labelling rule follow the PDF exactly; seven case constr
 | Case | PDF | On CARLA | Why |
 | --- | --- | --- | --- |
 | RC03 | speeds 8–14 m/s | shown at 18 and 22 m/s | Under the 8 m/s² sideways limit, no swerve window exists at 8–14 m/s: every admissible lane change needs more gap than braking does |
-| RC04 | staged brake then lane change works where single moves fail | no example | 92 scenes searched (base and extended grids); none showed the contrast. Reported, not forced |
+| RC04 | staged brake then lane change works where single moves fail | no example | 92 scenes with time-defined lane changes, then 22 with path-length lane changes (below); none showed the contrast. Reported, not forced |
 | RC10, RC11, RC13, RC14 | junction or occluding-van site | same straight two-lane road; the car is withheld from the ego's feed until the reveal time | Keeps one site for all cases. A physical blocker would add an obstacle to the margin and change the labels |
 | RC02 | a model result: no move can avoid the crash | unrecoverable for the stated move library only (U_LIBRARY) | A finite CARLA library cannot prove that no controller could recover |
 | RC09 | unrecoverable | U_LIBRARY for the stated 25-move class, in one rear-vehicle world | Same reason; the left lane is blocked by a queue of parked cars |
 | RC13 | an over-cautious predictor rejects the working move | a simple envelope predictor in `cases/negatives.py`, outside the labelling pipeline | It illustrates the false rejection; it never produces a label |
 | All two-lane cases | physical tyre limits | declared limits a_lat_max = 8 m/s² (and a_comb_max = 8 m/s² in RC18) | The calibrated tyre friction of 5.0 is not physical, so an unlimited lane change could use impossible grip |
+
+### RC04: why no example was found
+
+- **Time-defined lane changes (the first 92 scenes):** a perfectly tracked lane change of fixed duration has the same sideways acceleration at every speed. Braking first then shortens the distance the change needs only below about 10–12 m/s, while a swerve beats braking only above about 17 m/s, so the windows do not overlap. The steering controller adds some speed dependence: enough on the mock plant (a contrast at 18 m/s, lane change 1.6 s), not enough on CARLA.
+- **Path-length lane changes (added, `cases/compositional.rc04_path_library`):** a change over a fixed distance has sideways acceleration growing with v², which is the PDF's mechanism. On the mock plant this gives the contrast in 22 scenes (30 m change at 22 m/s; 40 m change at 25–30 m/s).
+- **On CARLA (22 scenes, `mining/results/carla/rc04_path.md`):** the immediate change fails as predicted (12–17 m/s² against the 8 m/s² limit), but braking first then changing passes only where braking alone already passes; the closest scene (28 m/s, 60 m gap) has both at −0.013. CARLA's braking is stronger than the mock's near standstill (see the time-step section), which shifts the braking boundary onto the window. 30 m/s was not tried.
 
 ## Boundary and info-gap mining
 
@@ -119,8 +126,22 @@ Mining searches inside one case family for where scenes switch from recoverable 
 | | bisect | 39.0 / 100 | 72.0 | 11 per seed (22 total) |
 | | cem | 30.5 / 40 | 32.5 | — |
 | | bo_lcb | 33.5 / 40 | 34.0 | — |
+| RC07 hand-back family, gap × rear gap × rear speed × speed | sobol | 6.5 / 100 | n/a (all margins < 0.3) | — |
+| | straddle | 29.5 / 100 | n/a | — |
+| | bisect | 42.5 / 100 | n/a | 8 per seed (14 distinct) |
+| | cem | 11.5 / 40 | n/a | — |
+| | bo_lcb | 30.5 / 40 | n/a | — |
 
-- **Matched pairs** are two scenes that differ in one setting, one recoverable and one not; both were re-run and re-labelled from the full record. 37 pairs in total.
+Quality-diversity search (qd_fail, qd_boundary; 40 scenes per seed) spreads its scenes for coverage rather than chasing the boundary:
+
+| Family | qd_fail unrecoverable | qd_boundary unrecoverable | qd near boundary (of 40) |
+| --- | --- | --- | --- |
+| Corridor | 23.0 / 40 | 21.5 / 40 | 23.5 and 22.5 (cem and bo_lcb: 33) |
+| RC03 | 12.0 / 40 | 11.5 / 40 | 14.0 and 13.5 |
+| RC07 | 3.5 / 40 | 4.0 / 40 | n/a |
+
+- **Matched pairs** are two scenes that differ in one setting, one recoverable and one not; both were re-run and re-labelled from the full record. 51 pairs in total (15 corridor, 22 RC03, 14 RC07).
+- **RC07:** unrecoverable scenes are rare (random sampling finds 6.5 per 100); the boundary-seeking methods find 4–6 times as many. Every RC07 margin is small (the best move reaches about +0.12), so the near-boundary count is not informative there.
 - **Agreement with the formula:** in the corridor family the CARLA label matches the sign of the analytic margin for 86–99% of scenes; the bisect flip sits 0.97 m on the safe side of the analytic boundary on average.
 - **Info-gap mining (RC10/RC11 family):** cem and straddle searched (D, v, t_reveal) for scenes unrecoverable only for lack of information (V_hind ≥ 0 > V). 6 of 36 scenes were found; the best has gap 0.188 (D 26.8 m, v 17.1 m/s, reveal 0.7 s). All 6 sit below the analytic common-stop distance and after the analytic reveal threshold, as the theory requires.
 
@@ -137,6 +158,19 @@ The normalisation constants cannot change a label, while the 1 m clearance reser
 | eps | +0.05 | 127 |
 
 These rates overstate the sensitivity of a typical scene: mining and the case sweeps put most records near the boundary on purpose. 24 RC03 records were left out because two library moves share a name. Horizon, hold time, post-manoeuvre time and stop speed change the rollout itself, so they need new CARLA runs and were not tested.
+
+## Time-step sensitivity
+
+Margins that do not end in a stop are stable to the step size, but every braking-to-stop result depends on the 0.05 s step. The headline scenes were re-run at 0.025 s in the same server session (`mining/results/carla/dt_check.md`; RC18 left out, because its brake-steer limit smooths over a fixed number of ticks).
+
+| | Result |
+| --- | --- |
+| Margins compared | 98 policy-world margins in 23 scenes |
+| Finite shifts | median 0.003, largest 0.028 (the within-session repeat spread) |
+| Sign changes | 6, all stop-and-hold moves with small margins at 0.05 s (RC01 brake_hold, RC17 at 0.40 s, RC05 abort_if_closing, RC06 wait moves, RC15 fallback), all to −inf |
+| Label changes | 2: RC01 at gap 16 and RC17 at delay 0.40 s become U_LIBRARY |
+
+**Cause.** At 0.05 s the last 6 m/s of braking ends in a 23–33 m/s² snap to rest (it is visible in the calibration bands); at 0.025 s it is absent and the car decelerates at about 4 m/s² to the end. In RC01 the ego then reaches the blocker at 4.8 m/s instead of stopping 1.08 m short. The snap is a numerical artefact of the coarser step, and the calibrated b_cal = 6.211 m/s² includes it. **So braking boundaries (RC01/RC02, RC17's delay edge, the corridor mining boundary) hold for the 0.05 s step and, in the one scene measured (RC01, gap 16 m), are about 3 m optimistic against a finer step (the ego still moves at 4.8 m/s at the blocker, 3 m of braking at 4 m/s²).** Lane-change, library, observation and nuisance results are unaffected. A re-run at a finer step would mean re-calibrating the brakes and re-running every braking case.
 
 ## Decisions
 
@@ -165,6 +199,8 @@ No problem below changed a published case label after its fix, except where a re
 
 | Stage | Problem | Fix |
 | --- | --- | --- |
+| Time-step check | Stop-and-hold moves that pass at 0.05 s fail at 0.025 s: the 0.05 s step ends braking with an artificial snap to rest | Documented; braking boundaries stated as specific to the 0.05 s step (re-calibration and re-run not done) |
+| RC04 | 92 scenes with time-defined lane changes gave no example | Analysed why; added path-length lane changes (still no CARLA example in 22 scenes) |
 | Videos | A camera image left waiting after a tick froze the server's game thread whenever the client sent any other request first | The recorder takes both camera images straight after every tick |
 | Videos | The untextured road washed out to white; after a crash, CARLA physics threw cars off the road | Composited colour frames; the clip freezes at first contact (the run ends there anyway) |
 | Report | "Max repeat spread 0.028" covered one server session only; a fresh session shifted one RC03 margin by 0.196 | Both figures are now stated; headline margins below 0.196 are flagged |
@@ -189,10 +225,10 @@ Clips are in `mining/results/carla/videos/` (git-ignored; the index with the sig
 
 ## Not done and open issues
 
-Seven items remain open; qd mining is queued next, and the G-sensitivity script above is done.
+RC07 mining, qd mining, G sensitivity and the time-step check are done; these remain open.
 
-- [ ] **qd_fail and qd_boundary mining on CARLA:** the algorithms exist and run on the mock simulator; the CARLA run is queued after the videos.
-- [ ] **RC07 mining family on CARLA:** needs a CARLA variant of the RC07 family in `mining/families.py`.
+- [ ] **Braking at a finer time step:** re-calibrate the brakes at 0.025 s and re-run the braking cases, if braking boundaries must not depend on the step (about a full day of CARLA time).
+- [ ] **RC04 at 30 m/s and above, or with other lane-change lengths:** the last untried part of the path-length window.
 - [ ] **Determinism across two servers:** only one server fits in 6 GB of GPU memory.
 - [ ] **Cosmos appearance variants:** scheduled for late Oct to early Nov; needs more GPU than this laptop has.
 - [ ] **G sensitivity for timing settings** (horizon, hold time, stop speed): needs new CARLA runs.

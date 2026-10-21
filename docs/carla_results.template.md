@@ -31,9 +31,9 @@ PASS = criterion met as stated; WARN = met with a caveat listed in section 7; NO
 | 4 | RC07 premature hand-back | WARN | `core.md` (re-run on fixed plant); contrast only at rear_gap 100 (selected gap 34, rear_gap 100, rear_v 18) |
 | 4 | RC12, RC19, RC20 | WARN | `core.md`; RC12 and RC19 from the pre-restart session |
 | 5 | corridor and rc03 mining (sobol, straddle, bisect, cem, bo_lcb), matched pairs, D4 repeats | WARN | `mining/corridor`, `mining/rc03`, `mining/repeat_spread.md`; sigma superseded (section 7) |
-| 5 | RC07 mining family | NOT EXECUTED | optional in Task 5, skipped |
-| 5 | qd_fail and qd_boundary on CARLA | NOT EXECUTED | not run on CARLA (exist in `algos.REGISTRY`, mock only) |
-| 5 | G sensitivity on CARLA | NOT EXECUTED | only the mock files `results/g_sensitivity*.md` exist; no CARLA G-sensitivity file was produced |
+| 5 | RC07 mining family | WARN | run after the main tasks (`mining/rc07/summary.md`, family `families.Rc07Carla`, same library and limit as the RC07 case): 14 distinct verified pairs; every scene has \|V\| < 0.3, so the near-boundary column carries no information for this family |
+| 5 | qd_fail and qd_boundary on CARLA | PASS | run after the main tasks on corridor, rc03 and rc07 (2 seeds x 40 scenes); rows in each family's `summary.md` |
+| 5 | G sensitivity on CARLA | WARN | `mining/results/carla/g_sensitivity.md`: 2,230 stored records re-scored (no new runs); q_* change no label, reserve_m x0.5/x1.5 changes 193/227, eps +/-0.05 changes 116/127; timing constants (horizon, hold) not testable from records |
 | 6 | RC05, RC06, RC08, RC15, RC18 | WARN | `compositional.md`; moving actors start 3.2-5.3% low (compositional.md); RC18 limits declared, a_comb mask |
 | 6 | RC04 | WARN | no CARLA positive witness after 92 scanned scenes (reported, not forced) |
 | 7 | RC10, RC11, RC14 and the reveal-time transition | WARN | `occlusion.md`, `occlusion_transition.png`; the transition is shown, but the 0.25 s cross-check tolerance cannot be verified as pre-declared (single commit) and the analytic t* lies before the measured bracket in 4 of 6 scenes (a one-sided conservative bound, +0.05..+0.22 s), so the cross-check is weaker than a match |
@@ -73,7 +73,9 @@ Other anchors: RC12 upper feasible prefix minus analytic T_p* = +0.016 s (`core.
 
 ### 3.4 G sensitivity
 
-Mock only (`results/g_sensitivity.md`, `results/g_sensitivity_v2.md`, untracked local files). No CARLA G sensitivity was produced (NOT EXECUTED).
+CARLA: `mining/results/carla/g_sensitivity.md` (stored records re-scored; method in `scripts/g_sensitivity_carla.py`). Mock: `results/g_sensitivity.md`, `results/g_sensitivity_v2.md` (untracked local files).
+
+**Time step.** `mining/results/carla/dt_check.md` re-ran the headline scenes at 0.025 s in the same session: margins that do not end in a stop moved by at most 0.028 (median 0.003), but every stop-and-hold move that passed at 0.05 s with a small margin failed at 0.025 s (6 margins, 2 class changes: RC01 at gap 16 and RC17 at delay 0.40). Cause: at 0.05 s the last 6 m/s of braking ends in a 23-33 m/s^2 snap to rest (see the calibration bands), which is absent at 0.025 s (about 4 m/s^2). Braking boundaries are therefore specific to the 0.05 s step; the calibrated b_cal includes the snap.
 
 ### 3.5 Per-family mining
 

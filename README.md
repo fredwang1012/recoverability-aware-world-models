@@ -9,9 +9,10 @@ CSC2626 project. A driving scene is **recoverable** when some move in a stated l
 ## Status (2026-10-20)
 
 - All 20 cases (RC01–RC20) are built and labelled on CARLA 0.9.16; 19 show their intended mechanism, and RC04 has no positive example.
-- Boundary mining (sobol, straddle, bisect, cem, bo_lcb) ran on the corridor and RC03 families: 37 matched pairs. Information-gap mining ran on RC10/RC11: 6 info-gap scenes.
+- Boundary mining (sobol, straddle, bisect, cem, bo_lcb, qd_fail, qd_boundary) ran on the corridor, RC03 and RC07 families: 51 matched pairs. Information-gap mining ran on RC10/RC11: 6 info-gap scenes.
 - Dataset export (E1) validates on both the mock and CARLA data, and G sensitivity is re-scored on 2,230 CARLA records. 36 case videos are recorded.
-- Open: qd mining on CARLA, RC07 mining, the two-server determinism check, Cosmos appearance variants. See [the report](docs/REPORT.md#not-done-and-open-issues).
+- Braking-to-stop boundaries depend on the 0.05 s step (checked at 0.025 s); other margins do not.
+- Open: braking at a finer step, the two-server determinism check, Cosmos appearance variants. See [the report](docs/REPORT.md#not-done-and-open-issues).
 
 ## Layout
 
