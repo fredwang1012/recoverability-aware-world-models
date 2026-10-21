@@ -14,6 +14,14 @@ CSC2626 project. A driving scene is **recoverable** when some move in a stated l
 - Braking-to-stop boundaries depend on the 0.05 s step (checked at 0.025 s); other margins do not.
 - Open: braking at a finer step, the two-server determinism check, Cosmos appearance variants. See [the report](docs/REPORT.md#not-done-and-open-issues).
 
+## Limitations (read before using the numbers)
+
+- **Run-to-run noise.** CARLA is not deterministic: repeats in one server session move a margin by up to 0.028, and one re-run on a fresh server moved it by 0.196. Only RC08, RC12 and RC19 clear 0.196; every other passing headline margin (RC03 and RC20 at +0.008 the thinnest) could flip in a new session.
+- **Braking depends on the 0.05 s step (documented limit, not fixed).** At 0.05 s the last part of braking ends in an artificial snap to rest. At 0.025 s it does not, and the RC01 scene overshoots by about 3 m. RC01, RC02, RC17 and the corridor boundary hold for the 0.05 s step; lane-change, library, observation and nuisance results do not depend on it. Re-calibrating at a finer step would take about a day of CARLA time. Details: [report](docs/REPORT.md#time-step-sensitivity).
+- **"Unrecoverable" is relative** to the stated move library, worlds, horizon and threshold. RC02 and RC09 are not claims that no controller could recover.
+- **RC04 has no positive example on CARLA**, and the hidden-car cases (RC10, RC11, RC13, RC14) hide the car from the ego's feed rather than physically.
+- One server on one laptop: cross-server determinism was not tested, and the Cosmos appearance variants are not done.
+
 ## Videos
 
 36 clips (about 10 s each) show every case's headline scene, with the working move and the failing move side by side where a case has both. They are re-runs on CARLA with a chase camera and are a visual aid only; labels never come from them. The generated road has no scenery, so the look is composited: blue ego, red parked cars, orange moving cars, grass and asphalt painted in afterwards. In the hidden-car cases (RC10, RC11, RC13, RC14) nothing physical hides the car; it is drawn as a faint ghost marked "not visible to ego" until its reveal time. Each run stops at first contact and the clip freezes on a CONTACT banner. The clips are git-ignored (23 MB); the index with the outcome check is [`mining/results/carla/videos/index.md`](mining/results/carla/videos/index.md), and `scripts/carla_videos.py` rebuilds them (see [the setup guide](docs/CARLA_SETUP.md#run)).
