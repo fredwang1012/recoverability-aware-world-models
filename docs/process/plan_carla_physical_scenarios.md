@@ -1,7 +1,7 @@
 # Plan: CARLA physical scenarios + boundary mining (Fred, Approach 1)
 
-**Spec (binding authority):** `docs/v2/CLAUDE_CODE_PROMPT.md` (phases A-E) and `docs/v2/pdf_verification_and_additions.md`.
-Source catalogue: `mining/cases/catalogue.yaml` (from `docs/Recoverability_Definitions_and_CARLA_Cases.pdf`).
+**Spec (binding authority):** `docs/spec/CLAUDE_CODE_PROMPT.md` (phases A-E) and `docs/spec/pdf_verification_and_additions.md`.
+Source catalogue: `mining/cases/catalogue.yaml` (from `docs/spec/Recoverability_Definitions_and_CARLA_Cases.pdf`).
 Phase A is done (61 tests pass). This plan covers spec Phases B (rest), C, D and the D5/E1 hooks.
 
 ## Global Constraints (every task)

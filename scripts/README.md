@@ -11,13 +11,16 @@ Entry points. CARLA scripts need a running server (see [`../docs/CARLA_SETUP.md`
 | `carla_compositional.py` | RC04, RC05, RC06, RC08, RC15, RC18 | `results/carla/compositional.md` |
 | `carla_occlusion.py` | RC10, RC11, RC14 (reveal-time sweep and transition figure) | `results/carla/occlusion.md` |
 | `carla_negatives.py` | RC09, RC13 | `results/carla/negatives.md` |
-| `carla_videos.py` | Re-runs each headline scene with a chase camera; `--only RC03,RC05`, `--force` | `results/carla/videos/` |
+| `carla_rc04_path.py` | RC04 with path-length lane changes (22 scenes) | `results/carla/rc04_path.md` |
+| `carla_dt_check.py` | The headline scenes at 0.05 s and 0.025 s in one session (time-step sensitivity) | `results/carla/dt_check.md` |
+| `carla_videos.py` | Re-runs each headline scene with a chase camera; `--only RC03,RC05`, `--force` | `results/carla/videos/` (local, uncompressed) |
+| `publish_videos.py` | No server: compresses the clips into `docs/videos/` and writes its index | `docs/videos/` |
 
 ## Mining
 
 | Script | What it does |
 | --- | --- |
-| `mine_cases.py` | Boundary mining inside a family: `--family corridor|rc03 --backend mock|carla --algos sobol,straddle,bisect,cem,bo_lcb,qd_fail,qd_boundary --budget N --seeds K` |
+| `mine_cases.py` | Boundary mining inside a family: `--family corridor|rc03|rc07 --backend mock|carla --algos sobol,straddle,bisect,cem,bo_lcb,qd_fail,qd_boundary --budget N --seeds K` |
 | `mining_post.py` | After a CARLA mining run: repeat checks of found scenes (D4) and the recoverability maps |
 | `carla_repeat_check.py` | Measures the repeat spread of selected scenes on the live server |
 | `mine_infogap.py` | Info-gap mining on the RC10/RC11 family (`--from-records` rebuilds the summary without the simulator) |

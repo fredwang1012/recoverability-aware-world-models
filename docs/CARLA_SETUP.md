@@ -51,7 +51,10 @@ $PY ../scripts/carla_core.py            # RC03 RC07 RC12 RC19 RC20
 $PY ../scripts/carla_compositional.py   # RC04 RC05 RC06 RC08 RC15 RC18
 $PY ../scripts/carla_occlusion.py       # RC10 RC11 RC14
 $PY ../scripts/carla_negatives.py       # RC09 RC13
+$PY ../scripts/carla_rc04_path.py       # RC04 with path-length lane changes
+$PY ../scripts/carla_dt_check.py        # headline scenes at 0.05 s and 0.025 s
 $PY ../scripts/carla_videos.py          # 36 clips; --only RC03,RC05 for a subset, --force to redo
+cd .. && $PY scripts/publish_videos.py  # compress the clips into docs/videos/ (no server needed)
 ```
 
 Every scene is checkpointed as one JSONL record in `mining/results/carla/<group>/`. A re-run skips finished scenes; move the `.jsonl` files aside to run fresh. The checkpoints are git-ignored (local only); the summary `.md` files are committed.

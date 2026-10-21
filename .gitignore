@@ -6,9 +6,12 @@ __pycache__/
 
 # run outputs: everything under any results/ folder is ignored by default.
 # The summaries worth keeping (md tables, figures, small json) are added with `git add -f`;
-# raw checkpoints (*.jsonl), datasets and videos stay local.
+# raw checkpoints (*.jsonl), datasets and the uncompressed videos stay local.
 results/
+
+# videos: only the compressed copies in docs/videos/ are committed
 *.mp4
+!docs/videos/*.mp4
 
 # scratch
 files*.zip

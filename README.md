@@ -2,14 +2,14 @@
 
 CSC2626 project. A driving scene is **recoverable** when some move in a stated library keeps a positive safety margin in every world the scene allows. This repo builds the 20 constructed recoverability cases on CARLA, labels them from executed evidence, and mines the recoverable/unrecoverable boundary inside each case family. It is Approach 1 of the project (Frederick Wang); the world model, its evaluation and the Autoware baseline belong to teammates.
 
-**Start here:** [`docs/REPORT.md`](docs/REPORT.md), the full write-up: PDF to setup, results per case, decisions, problems, open issues. Live, editable version: [Claude Doc](https://claude.ai/artifact/FqWMCYVENDUFkjkbAVpykJ).
+**Start here:** [`docs/REPORT.md`](docs/REPORT.md), the full write-up: PDF to setup, results per case, decisions, problems, open issues. Live version: [Claude Doc](https://claude.ai/artifact/FqWMCYVENDUFkjkbAVpykJ). Related work and methods: [`docs/RESEARCH_METHODS.md`](docs/RESEARCH_METHODS.md).
 
 ![Labels come only from executed CARLA evidence](docs/img/pipeline.png)
 
 ## Status (2026-10-20)
 
 - All 20 cases (RC01–RC20) are built and labelled on CARLA 0.9.16; 19 show their intended mechanism, and RC04 has no positive example.
-- Boundary mining (sobol, straddle, bisect, cem, bo_lcb, qd_fail, qd_boundary) ran on the corridor, RC03 and RC07 families: 51 matched pairs. Information-gap mining ran on RC10/RC11: 6 info-gap scenes.
+- Boundary mining (sobol, straddle, bisect, cem, bo_lcb, qd_fail, qd_boundary) ran on the corridor, RC03 and RC07 families: 53 matched pairs (45 distinct). Information-gap mining ran on RC10/RC11: 6 info-gap scenes.
 - Dataset export (E1) validates on both the mock and CARLA data: the CARLA dataset has 2,318 labelled scenes (1,185 R_REF, 1,127 U_LIBRARY, 6 U_INFORMATION) from corridor, RC03, RC07 and info-gap mining, 0 invalid. G sensitivity is re-scored on 2,230 CARLA records.
 - Braking-to-stop boundaries depend on the 0.05 s step (checked at 0.025 s); other margins do not.
 - Open: braking at a finer step, the two-server determinism check, Cosmos appearance variants. See [the report](docs/REPORT.md#not-done-and-open-issues).
@@ -24,19 +24,18 @@ CSC2626 project. A driving scene is **recoverable** when some move in a stated l
 
 ## Videos
 
-36 clips (about 10 s each) show every case's headline scene, with the working move and the failing move side by side where a case has both. They are re-runs on CARLA with a chase camera and are a visual aid only; labels never come from them. The generated road has no scenery, so the look is composited: blue ego, red parked cars, orange moving cars, grass and asphalt painted in afterwards. In the hidden-car cases (RC10, RC11, RC13, RC14) nothing physical hides the car; it is drawn as a faint ghost marked "not visible to ego" until its reveal time. Each run stops at first contact and the clip freezes on a CONTACT banner. The clips are git-ignored (23 MB); the index with the outcome check is [`mining/results/carla/videos/index.md`](mining/results/carla/videos/index.md), and `scripts/carla_videos.py` rebuilds them (see [the setup guide](docs/CARLA_SETUP.md#run)).
+36 clips (10 to 15 s each) show every case's headline scene, with the working move and the failing move side by side where a case has both. They are re-runs on CARLA with a chase camera and are a visual aid only; labels never come from them. The generated road has no scenery, so the look is composited: blue ego, red parked cars, orange moving cars, grass and asphalt painted in afterwards. In the hidden-car cases (RC10, RC11, RC13, RC14) nothing physical hides the car; it is drawn as a faint ghost marked "not visible to ego" until its reveal time. Each run stops at first contact and the clip freezes on a CONTACT banner. **Watch them in [`docs/videos/`](docs/videos/README.md)** (38 MB, compressed copies, each with its outcome). `scripts/carla_videos.py` re-records them and `scripts/publish_videos.py` compresses them (see [the setup guide](docs/CARLA_SETUP.md#run)); the uncompressed originals (1.4 GB) stay local.
 
 ## Layout
 
 | Folder | What is in it |
 | --- | --- |
-| [`docs/`](docs/README.md) | Report, CARLA setup guide, generated results report, the spec and the PDF |
+| [`docs/`](docs/README.md) | Report, CARLA setup guide, research notes, generated results report, the spec and the PDF, and the [case videos](docs/videos/README.md) |
 | [`mining/`](mining/README.md) | The Python package: recoverability contract, margin, harness, CARLA plant, case builders, mining algorithms, export |
 | [`mining/results/carla/`](mining/results/carla/README.md) | CARLA result summaries (committed) and raw records (local only) |
 | [`scripts/`](scripts/README.md) | Entry points: one script per case group, mining, sensitivity, videos, report builder |
 | `tests/` | `pytest` suite (mock plant and pure helpers; no CARLA server needed) |
 | `results/mock/` | Mock-plant outputs kept for comparison |
-| [`archive/`](archive/README.md) | Early starter code, superseded by `mining/` |
 
 ## Quickstart
 

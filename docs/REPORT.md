@@ -140,7 +140,7 @@ Quality-diversity search (qd_fail, qd_boundary; 40 scenes per seed) spreads its 
 | RC03 | 12.0 / 40 | 11.5 / 40 | 14.0 and 13.5 |
 | RC07 | 3.5 / 40 | 4.0 / 40 | n/a |
 
-- **Matched pairs** are two scenes that differ in one setting, one recoverable and one not; both were re-run and re-labelled from the full record. 51 pairs in total (15 corridor, 22 RC03, 14 RC07).
+- **Matched pairs** are two scenes that differ in one setting, one recoverable and one not; both were re-run and re-labelled from the full record. 53 pairs in total (15 corridor, 22 RC03, 16 RC07; 45 distinct scene pairs, because bisect chains can reach the same pair twice).
 - **RC07:** unrecoverable scenes are rare (random sampling finds 6.5 per 100); the boundary-seeking methods find 4–6 times as many. Every RC07 margin is small (the best move reaches about +0.12), so the near-boundary count is not informative there.
 - **Agreement with the formula:** in the corridor family the CARLA label matches the sign of the analytic margin for 86–99% of scenes; the bisect flip sits 0.97 m on the safe side of the analytic boundary on average.
 - **Info-gap mining (RC10/RC11 family):** cem and straddle searched (D, v, t_reveal) for scenes unrecoverable only for lack of information (V_hind ≥ 0 > V). 6 of 36 scenes were found; the best has gap 0.188 (D 26.8 m, v 17.1 m/s, reveal 0.7 s). All 6 sit below the analytic common-stop distance and after the analytic reveal threshold, as the theory requires.
@@ -216,14 +216,14 @@ No problem below changed a published case label after its fix, except where a re
 
 ## Videos
 
-36 clips of about 10 s each show the headline scene of every case, re-run live on CARLA; each clip's outcome matches the stored result in sign (36 of 36). They are a visual aid only and never feed a label.
+36 clips of 10 to 15 s each show the headline scene of every case, re-run live on CARLA; each clip's outcome matches the stored result in sign (36 of 36). They are a visual aid only and never feed a label.
 
 - **Format:** 1 s title card, the 8 s run in real time, 1 s result card with the margin. Chase camera behind and above the ego, 1280 × 720, 20 fps.
 - **Colours:** blue = ego, red = parked obstacle, orange = moving car. The road and grass are painted in afterwards, because the generated map has no textures.
 - **Hidden cars (RC10, RC11, RC13, RC14):** a car the ego has not been told about yet is drawn as a faint ghost in an amber box marked "not visible to ego"; a banner marks the reveal time.
 - **Contact:** the run ends at first contact, so the clip freezes on that frame with a red CONTACT banner rather than showing CARLA's crash physics.
 
-Clips are in `mining/results/carla/videos/` (git-ignored; the index with the sign check is [`videos/index.md`](../mining/results/carla/videos/index.md)); rebuild with `scripts/carla_videos.py --force`, or `--only RC03,RC05` for a subset.
+The clips are in [`docs/videos/`](videos/README.md) (compressed, 38 MB); the recording index with the outcome check is [`mining/results/carla/videos/index.md`](../mining/results/carla/videos/index.md). Rebuild with `scripts/carla_videos.py --force` (or `--only RC03,RC05`), then `scripts/publish_videos.py`.
 
 ## Not done and open issues
 
@@ -250,6 +250,7 @@ All on branch [`carla-physical-scenarios`](https://github.com/fredwang1012/recov
 | Per-group results | `mining/results/carla/{foundation,core,compositional,occlusion,negatives}.md` |
 | Mining results | `mining/results/carla/mining/{corridor,rc03,infogap}/` |
 | G sensitivity | `mining/results/carla/g_sensitivity.md` |
-| Video index | `mining/results/carla/videos/index.md` |
+| Videos | [`docs/videos/`](videos/README.md) (compressed copies and index) |
+| Related work and methods | [`docs/RESEARCH_METHODS.md`](RESEARCH_METHODS.md) |
 
 To re-run anything, see [`CARLA_SETUP.md`](CARLA_SETUP.md) and [`../scripts/README.md`](../scripts/README.md).

@@ -5,7 +5,7 @@ Task V: CARLA camera videos of the 20 recoverability cases (RC01-RC20).  Visuali
 
 Needs a live, bring-up-passed server (never started here).  Each case's headline scene is RE-RUN through the group scripts' own
 record-building functions with the plant factory replaced by sim.video.RecordingPlant (jsonl caches are only READ afterwards, for
-the stored-G sign check; nothing is appended to them).  Clips: results/carla/videos/<stem>.mp4 (git-ignored), thumbnails
+the stored-G sign check; nothing is appended to them).  Clips: results/carla/videos/<stem>.mp4 (local, near-lossless; scripts/publish_videos.py makes the small committed copies in docs/videos/), thumbnails
 results/carla/videos/thumbs/<stem>.png, per-clip sidecars results/carla/videos/meta/<stem>.json, summary results/carla/videos/index.md.
 A clip whose mp4 already exists is skipped unless --force.
 """

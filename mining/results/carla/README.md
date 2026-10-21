@@ -25,13 +25,16 @@ Everything here came from CARLA 0.9.16 runs (physics profile `pp_381b4c6e55`). T
 | File | Contents |
 | --- | --- |
 | `mining/corridor/`, `mining/rc03/` | `summary.md` (per-algorithm counts), `pairs.md` (matched pairs), `d4.md` (repeats of found scenes), `map_*.png` (recoverability maps) |
+| `mining/rc07/` | `summary.md`, `pairs.md` (no repeat check or map was made for this family) |
 | `mining/infogap/` | `infogap.md`: information-gap scenes found by cem and straddle on RC10/RC11 |
 | `mining/repeat_spread.md`, `mining/sigma028.md` | Measured repeat spread and the re-flag at 0.028 |
 | `g_sensitivity.md` | Label changes when each margin constant moves (re-scored from the stored records) |
+| `rc04_path.md` | RC04 with path-length lane changes: 22 CARLA scenes, no witness |
+| `dt_check.md` | Time-step sensitivity: headline scenes at 0.05 s and 0.025 s |
 
 ## Videos
 
-`videos/index.md` lists the 36 clips with each clip's outcome checked against the stored record. The `.mp4` files are local only; rebuild them with `scripts/carla_videos.py`.
+`videos/index.md` lists the 36 recorded clips with each clip's outcome checked against the stored record. The uncompressed `.mp4` files (1.4 GB) are local only; the compressed copies are in [`docs/videos/`](../../../docs/videos/README.md). Rebuild with `scripts/carla_videos.py`, then `scripts/publish_videos.py`.
 
 ## Local-only folders
 
